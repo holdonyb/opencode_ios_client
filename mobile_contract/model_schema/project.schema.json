@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "opencode.mobile.project",
+  "title": "Project",
+  "type": "object",
+  "required": ["id", "worktree"],
+  "properties": {
+    "id": { "type": "string" },
+    "worktree": { "type": "string" },
+    "vcs": { "type": ["string", "null"] },
+    "time": { "type": ["object", "null"] }
+  },
+  "additionalProperties": true
+}
+

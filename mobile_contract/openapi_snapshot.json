@@ -1,0 +1,38 @@
+{
+  "snapshot_date": "2026-03-04",
+  "api_base": "/",
+  "transport": {
+    "rest": "application/json",
+    "sse": "text/event-stream"
+  },
+  "required_endpoints": [
+    { "method": "GET", "path": "/global/health" },
+    { "method": "GET", "path": "/global/event" },
+    { "method": "GET", "path": "/session" },
+    { "method": "POST", "path": "/session" },
+    { "method": "PATCH", "path": "/session/{id}" },
+    { "method": "DELETE", "path": "/session/{id}" },
+    { "method": "GET", "path": "/session/status" },
+    { "method": "GET", "path": "/session/{id}/message" },
+    { "method": "POST", "path": "/session/{id}/prompt_async" },
+    { "method": "POST", "path": "/session/{id}/abort" },
+    { "method": "GET", "path": "/session/{id}/todo" },
+    { "method": "POST", "path": "/session/{id}/permissions/{permissionID}" },
+    { "method": "GET", "path": "/project" },
+    { "method": "GET", "path": "/project/current" },
+    { "method": "GET", "path": "/config/providers" },
+    { "method": "GET", "path": "/agent" },
+    { "method": "GET", "path": "/file", "query": ["path"] },
+    { "method": "GET", "path": "/file/content", "query": ["path"] },
+    { "method": "GET", "path": "/file/status" },
+    { "method": "GET", "path": "/find/file", "query": ["query", "limit"] }
+  ],
+  "compatibility_notes": [
+    "Message model may expose provider/model in nested model object OR top-level providerID/modelID.",
+    "Providers payload may expose providers as array OR map.",
+    "Provider models may expose models as map OR array.",
+    "Part.state may be a string OR object.",
+    "SSE payload is expected in data: lines; multi-line data must be concatenated with newline."
+  ]
+}
+

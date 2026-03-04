@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "opencode.mobile.part",
+  "title": "Part",
+  "type": "object",
+  "required": ["id", "messageID", "sessionID", "type"],
+  "properties": {
+    "id": { "type": "string" },
+    "messageID": { "type": "string" },
+    "sessionID": { "type": "string" },
+    "type": { "type": "string" },
+    "text": { "type": ["string", "null"] },
+    "tool": { "type": ["string", "null"] },
+    "callID": { "type": ["string", "null"] },
+    "state": {
+      "oneOf": [
+        { "type": "string" },
+        { "type": "object" },
+        { "type": "null" }
+      ]
+    },
+    "metadata": { "type": ["object", "null"] },
+    "files": {
+      "type": ["array", "null"],
+      "items": {
+        "type": "object",
+        "properties": {
+          "path": { "type": "string" },
+          "additions": { "type": "integer" },
+          "deletions": { "type": "integer" },
+          "status": { "type": ["string", "null"] }
+        },
+        "additionalProperties": true
+      }
+    }
+  },
+  "additionalProperties": true
+}
+

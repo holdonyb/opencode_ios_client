@@ -1,0 +1,9 @@
+{
+  "app": {
+    "bundleName": "ai.opencode.mobile.harmony",
+    "vendor": "opencode",
+    "versionCode": 1,
+    "versionName": "0.1.0"
+  }
+}
+

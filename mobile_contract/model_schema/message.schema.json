@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "opencode.mobile.message",
+  "title": "MessageWithParts",
+  "type": "object",
+  "required": ["info", "parts"],
+  "properties": {
+    "info": {
+      "type": "object",
+      "required": ["id", "sessionID", "role", "time"],
+      "properties": {
+        "id": { "type": "string" },
+        "sessionID": { "type": "string" },
+        "role": { "type": "string" },
+        "parentID": { "type": ["string", "null"] },
+        "providerID": { "type": ["string", "null"] },
+        "modelID": { "type": ["string", "null"] },
+        "model": {
+          "type": ["object", "null"],
+          "properties": {
+            "providerID": { "type": "string" },
+            "modelID": { "type": "string" }
+          },
+          "additionalProperties": true
+        },
+        "time": {
+          "type": "object",
+          "required": ["created"],
+          "properties": {
+            "created": { "type": "integer" },
+            "completed": { "type": ["integer", "null"] }
+          },
+          "additionalProperties": true
+        },
+        "tokens": { "type": ["object", "null"] },
+        "cost": { "type": ["number", "null"] },
+        "error": { "type": ["object", "null"] }
+      },
+      "additionalProperties": true
+    },
+    "parts": {
+      "type": "array",
+      "items": { "$ref": "part.schema.json" }
+    }
+  },
+  "additionalProperties": true
+}
+

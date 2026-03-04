@@ -48,6 +48,20 @@ Thumbs.db
 *.swo
 *~
 
+# Android
+*.apk
+*.aab
+.gradle/
+local.properties
+**/build/
+
+# HarmonyOS NEXT
+**/node_modules/
+**/.hvigor/
+**/.preview/
+**/.idea/
+**/*.hvigor_log
+
 # Security notes (local only)
 docs/security.md
 

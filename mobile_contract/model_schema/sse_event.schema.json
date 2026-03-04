@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "opencode.mobile.sse_event",
+  "title": "SSEEvent",
+  "type": "object",
+  "required": ["payload"],
+  "properties": {
+    "directory": { "type": ["string", "null"] },
+    "payload": {
+      "type": "object",
+      "required": ["type"],
+      "properties": {
+        "type": { "type": "string" },
+        "properties": { "type": ["object", "null"] }
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true
+}
+

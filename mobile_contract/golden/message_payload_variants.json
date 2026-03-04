@@ -1,0 +1,30 @@
+{
+  "name": "message_payload_shape_fallbacks",
+  "description": "message list endpoint can return array, {messages:[]}, {data:[]}, or single object",
+  "input": {
+    "array_shape": [
+      {
+        "info": { "id": "m1", "sessionID": "s1", "role": "assistant", "time": { "created": 1 } },
+        "parts": []
+      }
+    ],
+    "messages_shape": {
+      "messages": [
+        {
+          "info": { "id": "m2", "sessionID": "s1", "role": "assistant", "time": { "created": 2 } },
+          "parts": []
+        }
+      ]
+    },
+    "single_shape": {
+      "id": "m3",
+      "sessionID": "s1",
+      "role": "assistant",
+      "time": { "created": 3 }
+    }
+  },
+  "expected": {
+    "decoded_message_ids": ["m1", "m2", "m3"]
+  }
+}
+

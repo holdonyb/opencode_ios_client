@@ -1,0 +1,12 @@
+{
+  "module": {
+    "name": "entry",
+    "type": "entry",
+    "description": "OpenCode Harmony client",
+    "mainElement": "EntryAbility",
+    "deviceTypes": ["phone", "tablet"],
+    "deliveryWithInstall": true,
+    "installationFree": false
+  }
+}
+

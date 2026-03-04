@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "opencode.mobile.providers",
+  "title": "ProvidersResponse",
+  "type": "object",
+  "required": ["providers"],
+  "properties": {
+    "providers": {
+      "oneOf": [
+        { "type": "array" },
+        { "type": "object" }
+      ]
+    },
+    "default": { "type": ["object", "null"] }
+  },
+  "additionalProperties": true
+}
+

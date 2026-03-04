@@ -1,0 +1,67 @@
+{
+  "name": "streaming_delta_appends_and_flushes",
+  "description": "message.part.updated with delta should append; no-delta should trigger full reload path",
+  "input": {
+    "initial_state": {
+      "currentSessionID": "s1",
+      "streamingPartTexts": {}
+    },
+    "events": [
+      {
+        "directory": "/repo",
+        "payload": {
+          "type": "message.part.updated",
+          "properties": {
+            "sessionID": "s1",
+            "part": {
+              "messageID": "m1",
+              "id": "p1",
+              "type": "text"
+            },
+            "delta": "Hello"
+          }
+        }
+      },
+      {
+        "directory": "/repo",
+        "payload": {
+          "type": "message.part.updated",
+          "properties": {
+            "sessionID": "s1",
+            "part": {
+              "messageID": "m1",
+              "id": "p1",
+              "type": "text"
+            },
+            "delta": " world"
+          }
+        }
+      },
+      {
+        "directory": "/repo",
+        "payload": {
+          "type": "message.part.updated",
+          "properties": {
+            "sessionID": "s1",
+            "part": {
+              "messageID": "m1",
+              "id": "p1",
+              "type": "text"
+            }
+          }
+        }
+      }
+    ]
+  },
+  "expected": {
+    "after_second_event": {
+      "streamingPartTexts": {
+        "m1:p1": "Hello world"
+      }
+    },
+    "after_third_event": {
+      "shouldTriggerReload": true
+    }
+  }
+}
+

@@ -1,0 +1,30 @@
+{
+  "name": "session_switch_ignores_stale_response",
+  "description": "async response from old session must not overwrite current one",
+  "input": {
+    "sequence": [
+      { "action": "setCurrentSession", "sessionID": "A" },
+      { "action": "requestMessages", "requestID": "r1", "sessionID": "A" },
+      { "action": "setCurrentSession", "sessionID": "B" },
+      { "action": "requestMessages", "requestID": "r2", "sessionID": "B" },
+      {
+        "action": "responseMessages",
+        "requestID": "r1",
+        "sessionID": "A",
+        "messages": [{ "info": { "id": "ma", "sessionID": "A", "role": "assistant", "time": { "created": 1 } }, "parts": [] }]
+      },
+      {
+        "action": "responseMessages",
+        "requestID": "r2",
+        "sessionID": "B",
+        "messages": [{ "info": { "id": "mb", "sessionID": "B", "role": "assistant", "time": { "created": 2 } }, "parts": [] }]
+      }
+    ]
+  },
+  "expected": {
+    "currentSessionID": "B",
+    "visibleMessageIDs": ["mb"],
+    "ignoredResponseIDs": ["r1"]
+  }
+}
+

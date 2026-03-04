@@ -82,6 +82,13 @@ OpenCodeClient/
 - `docs/OpenCode_iOS_Client_PRD.md` — 产品需求
 - `docs/OpenCode_iOS_Client_RFC.md` — 技术方案
 - `docs/OpenCode_Web_API.md` — OpenCode API 说明
+- `docs/Mobile_Cross_Platform_Implementation.md` — Android/Harmony 实施进度
+
+## 新增目录（跨端）
+
+- `mobile_contract/` — Android + Harmony 共享协议契约与 golden 用例
+- `android_client/` — Android 端代码（Compose + Kotlin）
+- `harmony_client/` — HarmonyOS NEXT 端代码（ArkTS + ArkUI）
 
 ## License
 

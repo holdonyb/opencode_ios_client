@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "opencode.mobile.todo",
+  "title": "TodoItem",
+  "type": "object",
+  "properties": {
+    "id": { "type": ["string", "null"] },
+    "content": { "type": ["string", "null"] },
+    "status": { "type": ["string", "null"] },
+    "priority": { "type": ["string", "null"] },
+    "completed": { "type": ["boolean", "null"] }
+  },
+  "additionalProperties": true
+}
+

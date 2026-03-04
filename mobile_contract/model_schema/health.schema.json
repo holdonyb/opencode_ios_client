@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "opencode.mobile.health",
+  "title": "HealthResponse",
+  "type": "object",
+  "required": ["healthy"],
+  "properties": {
+    "healthy": { "type": "boolean" },
+    "version": { "type": ["string", "null"] }
+  },
+  "additionalProperties": true
+}
+
