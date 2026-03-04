@@ -1,5 +1,9 @@
 package ai.opencode.mobile.android
 
+import android.Manifest
+import android.content.pm.PackageManager
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -22,6 +26,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
@@ -49,9 +55,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
 import ai.opencode.mobile.android.ui.AppViewModel
 import ai.opencode.mobile.core.model.Part
@@ -64,6 +72,35 @@ fun OpenCodeAndroidApp(vm: AppViewModel = viewModel()) {
     val state by vm.state.collectAsState()
     val isRefreshing by vm.isRefreshing.collectAsState()
     val error by vm.lastError.collectAsState()
+    val context = LocalContext.current
+    val isRecording by vm.isRecording.collectAsState()
+    val isTranscribing by vm.isTranscribing.collectAsState()
+
+    val recordPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) {
+            vm.startRecording()
+        } else {
+            vm.clearError()
+        }
+    }
+
+    val onMicClick: () -> Unit = {
+        if (isRecording) {
+            vm.stopRecordingAndTranscribe()
+        } else {
+            val granted = ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.RECORD_AUDIO
+            ) == PackageManager.PERMISSION_GRANTED
+            if (granted) {
+                vm.startRecording()
+            } else {
+                recordPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+            }
+        }
+    }
 
     Scaffold(
         bottomBar = {
@@ -129,8 +166,8 @@ fun OpenCodeAndroidApp(vm: AppViewModel = viewModel()) {
             }
 
             when (selectedIndex) {
-                0 -> ChatScreen(vm, state)
-                1 -> FilesScreen(vm, state)
+                0 -> ChatScreen(vm = vm, state = state, onMicClick = onMicClick)
+                1 -> FilesScreen(vm = vm, state = state)
                 else -> SettingsScreen(vm, state)
             }
         }
@@ -138,11 +175,18 @@ fun OpenCodeAndroidApp(vm: AppViewModel = viewModel()) {
 }
 
 @Composable
-private fun ChatScreen(vm: AppViewModel, state: AppState) {
+private fun ChatScreen(vm: AppViewModel, state: AppState, onMicClick: () -> Unit) {
     val chatInput by vm.chatInput.collectAsState()
     val sessionTitleInput by vm.sessionTitleInput.collectAsState()
     val selectedModelIndex by vm.selectedModelIndex.collectAsState()
     val selectedAgentName by vm.selectedAgentName.collectAsState()
+    val canCreateSession by vm.canCreateSession.collectAsState()
+    val contextUsage by vm.contextUsage.collectAsState()
+    val hasMoreHistory by vm.hasMoreHistory.collectAsState()
+    val isLoadingOlderMessages by vm.isLoadingOlderMessages.collectAsState()
+    val isRecording by vm.isRecording.collectAsState()
+    val isTranscribing by vm.isTranscribing.collectAsState()
+    val providerError by vm.providerConfigError.collectAsState()
     val models = vm.models
 
     Column(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxSize()) {
@@ -170,7 +214,7 @@ private fun ChatScreen(vm: AppViewModel, state: AppState) {
                 modifier = Modifier.weight(1f),
                 singleLine = true
             )
-            Button(onClick = { vm.createSession() }, enabled = state.isConnected) {
+            Button(onClick = { vm.createSession() }, enabled = state.isConnected && canCreateSession) {
                 Text("Create")
             }
             OutlinedButton(onClick = { vm.renameCurrentSession() }, enabled = state.currentSessionID != null) {
@@ -178,6 +222,30 @@ private fun ChatScreen(vm: AppViewModel, state: AppState) {
             }
             OutlinedButton(onClick = { vm.deleteCurrentSession() }, enabled = state.currentSessionID != null) {
                 Text("Delete")
+            }
+        }
+
+        if (!canCreateSession) {
+            Text(
+                "Create session is disabled when a project is explicitly selected.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error
+            )
+        }
+
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+            OutlinedButton(onClick = { vm.summarizeCurrentSession() }, enabled = state.currentSessionID != null) {
+                Text("Compact")
+            }
+            OutlinedButton(onClick = { vm.loadOlderMessages() }, enabled = state.currentSessionID != null && (hasMoreHistory || isLoadingOlderMessages)) {
+                if (isLoadingOlderMessages) {
+                    CircularProgressIndicator(modifier = Modifier.width(16.dp), strokeWidth = 2.dp)
+                } else {
+                    Text("Load older")
+                }
+            }
+            OutlinedButton(onClick = { vm.loadProvidersConfig() }) {
+                Text("Refresh context")
             }
         }
 
@@ -203,6 +271,42 @@ private fun ChatScreen(vm: AppViewModel, state: AppState) {
                     label = { Text(name) }
                 )
             }
+        }
+
+        contextUsage?.let { usage ->
+            val color = when {
+                usage.usageRatio >= 0.9 -> Color(0xFFC62828)
+                usage.usageRatio >= 0.7 -> Color(0xFFEF6C00)
+                else -> Color(0xFF2E7D32)
+            }
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("Context usage", style = MaterialTheme.typography.titleSmall)
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        CircularProgressIndicator(
+                            progress = { usage.usageRatio.toFloat() },
+                            modifier = Modifier.width(28.dp),
+                            strokeWidth = 4.dp,
+                            color = color,
+                            trackColor = MaterialTheme.colorScheme.surfaceVariant
+                        )
+                        Text(
+                            "${usage.totalTokens}/${usage.contextLimit} (${(usage.usageRatio * 100).toInt()}%) • ${usage.providerID}/${usage.modelID}",
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                    Text(
+                        "input=${usage.inputTokens}, output=${usage.outputTokens}, reasoning=${usage.reasoningTokens}, cache(r/w)=${usage.cacheReadTokens}/${usage.cacheWriteTokens}",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    usage.totalSessionCost?.let { c ->
+                        Text("total cost: ${"%.4f".format(c)}", style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+            }
+        }
+        providerError?.takeIf { it.isNotBlank() }?.let {
+            Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
         }
 
         HorizontalDivider()
@@ -256,6 +360,23 @@ private fun ChatScreen(vm: AppViewModel, state: AppState) {
             modifier = Modifier.weight(1f),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
+            if (hasMoreHistory || isLoadingOlderMessages) {
+                item("load_more_hint") {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        if (isLoadingOlderMessages) {
+                            CircularProgressIndicator(modifier = Modifier.width(14.dp), strokeWidth = 2.dp)
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Loading older messages...", style = MaterialTheme.typography.bodySmall)
+                        } else {
+                            Text("Pull / tap Load older to fetch more history", style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
+                }
+            }
             items(state.messages, key = { it.info.id }) { msg ->
                 Card(
                     modifier = Modifier.fillMaxWidth(),
@@ -292,6 +413,16 @@ private fun ChatScreen(vm: AppViewModel, state: AppState) {
             IconButton(onClick = { vm.sendMessage() }, enabled = state.currentSessionID != null && state.isConnected) {
                 Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send")
             }
+            IconButton(
+                onClick = onMicClick,
+                enabled = state.currentSessionID != null && !isTranscribing
+            ) {
+                when {
+                    isTranscribing -> CircularProgressIndicator(modifier = Modifier.width(18.dp), strokeWidth = 2.dp)
+                    isRecording -> Icon(Icons.Default.Stop, contentDescription = "Stop recording", tint = Color(0xFFC62828))
+                    else -> Icon(Icons.Default.Mic, contentDescription = "Record voice")
+                }
+            }
             OutlinedButton(onClick = { vm.abortCurrentSession() }, enabled = state.currentSessionID != null) {
                 Text("Abort")
             }
@@ -327,6 +458,15 @@ private fun PartText(part: Part, streamingTexts: Map<String, String>) {
 @Composable
 private fun FilesScreen(vm: AppViewModel, state: AppState) {
     var pathInput by remember(state.filePath) { mutableStateOf(state.filePath) }
+    val searchQuery by vm.fileSearchQuery.collectAsState()
+    val searchResults by vm.fileSearchResults.collectAsState()
+    val diffs by vm.sessionDiffs.collectAsState()
+    val selectedDiff = remember(state.selectedFilePath, diffs) {
+        val selected = state.selectedFilePath ?: return@remember null
+        diffs.firstOrNull { it.file == selected || selected.endsWith(it.file) || it.file.endsWith(selected) }
+    }
+    var showDiff by remember(state.selectedFilePath, selectedDiff) { mutableStateOf(selectedDiff != null) }
+    var markdownPreview by remember(state.selectedFilePath) { mutableStateOf(true) }
     Column(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxSize()) {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
             OutlinedTextField(
@@ -341,6 +481,32 @@ private fun FilesScreen(vm: AppViewModel, state: AppState) {
             }
             OutlinedButton(onClick = { vm.loadFileRoot() }) {
                 Text("Root")
+            }
+        }
+
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+            OutlinedTextField(
+                value = searchQuery,
+                onValueChange = vm::setFileSearchQuery,
+                label = { Text("Search file") },
+                modifier = Modifier.weight(1f),
+                singleLine = true,
+                keyboardActions = KeyboardActions(onSearch = { vm.searchFiles() }),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text)
+            )
+            OutlinedButton(onClick = { vm.searchFiles() }) {
+                Text("Search")
+            }
+        }
+
+        if (searchResults.isNotEmpty()) {
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                items(searchResults) { path ->
+                    AssistChip(
+                        onClick = { vm.openFile(path) },
+                        label = { Text(path) }
+                    )
+                }
             }
         }
 
@@ -383,7 +549,35 @@ private fun FilesScreen(vm: AppViewModel, state: AppState) {
                 val content = state.selectedFileContent
                 when {
                     content == null -> Text("Select a file to preview.")
-                    content.type == "text" -> Text(content.content.orEmpty())
+                    content.type == "text" -> {
+                        val text = content.content.orEmpty()
+                        val isMarkdown = (state.selectedFilePath ?: "").lowercase().endsWith(".md") ||
+                            (state.selectedFilePath ?: "").lowercase().endsWith(".markdown")
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            if (selectedDiff != null) {
+                                OutlinedButton(onClick = { showDiff = !showDiff }) {
+                                    Text(if (showDiff) "Show content" else "Show diff")
+                                }
+                            }
+                            if (isMarkdown) {
+                                OutlinedButton(onClick = { markdownPreview = !markdownPreview }) {
+                                    Text(if (markdownPreview) "Markdown source" else "Markdown preview")
+                                }
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(8.dp))
+                        if (showDiff && selectedDiff != null) {
+                            Text("--- before ---", color = Color(0xFFC62828), style = MaterialTheme.typography.labelSmall)
+                            Text(selectedDiff.before)
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text("+++ after +++", color = Color(0xFF2E7D32), style = MaterialTheme.typography.labelSmall)
+                            Text(selectedDiff.after)
+                        } else if (isMarkdown && markdownPreview) {
+                            Text(text)
+                        } else {
+                            Text(text)
+                        }
+                    }
                     else -> Text("Binary file")
                 }
             }
@@ -394,8 +588,12 @@ private fun FilesScreen(vm: AppViewModel, state: AppState) {
 @Composable
 private fun SettingsScreen(vm: AppViewModel, state: AppState) {
     val settings by vm.settingsForm.collectAsState()
+    val speech by vm.speechForm.collectAsState()
+    val speechOk by vm.speechConnectionOk.collectAsState()
+    val speechError by vm.speechConnectionError.collectAsState()
     val ssh by vm.sshForm.collectAsState()
     val sshStatus by vm.sshStatus.collectAsState()
+    val canCreateSession by vm.canCreateSession.collectAsState()
     Column(
         verticalArrangement = Arrangement.spacedBy(8.dp),
         modifier = Modifier
@@ -427,6 +625,58 @@ private fun SettingsScreen(vm: AppViewModel, state: AppState) {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Button(onClick = { vm.applySettingsAndReconnect() }) { Text("Apply & Connect") }
             OutlinedButton(onClick = { vm.refreshAll() }) { Text("Refresh") }
+        }
+
+        Text("Speech recognition (AI Builder)", style = MaterialTheme.typography.titleMedium)
+        OutlinedTextField(
+            value = speech.baseUrl,
+            onValueChange = vm::setSpeechBaseUrl,
+            label = { Text("Speech Base URL") },
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true
+        )
+        OutlinedTextField(
+            value = speech.token,
+            onValueChange = vm::setSpeechToken,
+            label = { Text("Speech Token") },
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true,
+            visualTransformation = PasswordVisualTransformation()
+        )
+        OutlinedTextField(
+            value = speech.customPrompt,
+            onValueChange = vm::setSpeechCustomPrompt,
+            label = { Text("Custom Prompt") },
+            modifier = Modifier.fillMaxWidth(),
+            minLines = 2
+        )
+        OutlinedTextField(
+            value = speech.terminology,
+            onValueChange = vm::setSpeechTerminology,
+            label = { Text("Terminology (optional)") },
+            modifier = Modifier.fillMaxWidth(),
+            minLines = 2
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(onClick = { vm.testSpeechConnection() }) {
+                Text("Test speech")
+            }
+            Text(
+                text = when {
+                    speechOk -> "Connected"
+                    !speechError.isNullOrBlank() -> "Failed"
+                    else -> "Not tested"
+                },
+                color = when {
+                    speechOk -> Color(0xFF2E7D32)
+                    !speechError.isNullOrBlank() -> MaterialTheme.colorScheme.error
+                    else -> MaterialTheme.colorScheme.onSurfaceVariant
+                },
+                style = MaterialTheme.typography.bodyMedium
+            )
+        }
+        if (!speechError.isNullOrBlank()) {
+            Text(speechError ?: "", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
         }
 
         Text("SSH Tunnel (password/key auth)", style = MaterialTheme.typography.titleMedium)
@@ -517,6 +767,13 @@ private fun SettingsScreen(vm: AppViewModel, state: AppState) {
             AssistChip(
                 onClick = { vm.selectProject(project.worktree) },
                 label = { Text(project.worktree) }
+            )
+        }
+        if (!canCreateSession) {
+            Text(
+                "Create session is disabled because project filter is active. Switch back to Server default to create.",
+                color = MaterialTheme.colorScheme.error,
+                style = MaterialTheme.typography.bodySmall
             )
         }
 

@@ -1,9 +1,15 @@
 package ai.opencode.mobile.android.ui
 
-import androidx.lifecycle.ViewModel
+import android.app.Application
+import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import ai.opencode.mobile.android.speech.AIBuildersAudioClient
+import ai.opencode.mobile.android.speech.AndroidAudioRecorder
 import ai.opencode.mobile.android.ssh.AndroidSshTunnelManager
 import ai.opencode.mobile.android.ssh.SshTunnelConfig
+import ai.opencode.mobile.android.storage.LocalSettingsStore
+import ai.opencode.mobile.android.storage.SecureSecretStore
+import ai.opencode.mobile.core.model.FileDiff
 import ai.opencode.mobile.core.model.Message
 import ai.opencode.mobile.core.network.HttpOpenCodeApi
 import ai.opencode.mobile.core.network.OpenCodeApi
@@ -11,6 +17,8 @@ import ai.opencode.mobile.core.network.ServerConfig
 import ai.opencode.mobile.core.state.AppState
 import ai.opencode.mobile.core.state.AppStateStore
 import ai.opencode.mobile.core.state.SseSideEffect
+import java.io.File
+import kotlin.math.max
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -18,7 +26,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
-class AppViewModel : ViewModel() {
+class AppViewModel(application: Application) : AndroidViewModel(application) {
     data class SettingsForm(
         val baseUrl: String = "http://127.0.0.1:4096",
         val username: String = "",
@@ -43,6 +51,51 @@ class AppViewModel : ViewModel() {
         val localPort: String = "14096"
     )
 
+    data class SpeechForm(
+        val baseUrl: String = "https://space.ai-builders.com/backend",
+        val token: String = "",
+        val customPrompt: String = "Prefer snake_case filenames and keep code terms unchanged.",
+        val terminology: String = ""
+    )
+
+    data class ContextUsageSnapshot(
+        val sessionID: String,
+        val sessionTitle: String,
+        val providerID: String,
+        val modelID: String,
+        val contextLimit: Int,
+        val totalTokens: Int,
+        val inputTokens: Int,
+        val outputTokens: Int,
+        val reasoningTokens: Int,
+        val cacheReadTokens: Int,
+        val cacheWriteTokens: Int,
+        val totalSessionCost: Double?
+    ) {
+        val usageRatio: Double = if (contextLimit <= 0) 0.0 else (totalTokens.toDouble() / contextLimit.toDouble()).coerceIn(0.0, 1.0)
+    }
+
+    private object Keys {
+        const val serverBaseUrl = "server_base_url"
+        const val serverUsername = "server_username"
+        const val selectedProject = "selected_project_worktree"
+        const val speechBaseUrl = "speech_base_url"
+        const val speechPrompt = "speech_prompt"
+        const val speechTerminology = "speech_terminology"
+        const val sshHost = "ssh_host"
+        const val sshPort = "ssh_port"
+        const val sshUsername = "ssh_username"
+        const val sshUseKeyAuth = "ssh_use_key_auth"
+        const val sshRemotePort = "ssh_remote_port"
+        const val sshLocalPort = "ssh_local_port"
+
+        const val secretServerPassword = "secret_server_password"
+        const val secretSpeechToken = "secret_speech_token"
+        const val secretSshPassword = "secret_ssh_password"
+        const val secretSshPrivateKey = "secret_ssh_private_key"
+        const val secretSshPassphrase = "secret_ssh_passphrase"
+    }
+
     private val modelPresets = listOf(
         ModelPreset("GLM-5", "zai-coding-plan", "glm-5"),
         ModelPreset("Opus 4.6", "anthropic", "claude-opus-4-6"),
@@ -53,6 +106,11 @@ class AppViewModel : ViewModel() {
         ModelPreset("Gemini 3 Flash", "google", "gemini-3-flash-preview")
     )
 
+    private val localStore = LocalSettingsStore(getApplication())
+    private val secretStore = SecureSecretStore(getApplication())
+    private val speechClient = AIBuildersAudioClient()
+    private val audioRecorder = AndroidAudioRecorder()
+
     private var currentConfig = ServerConfig(baseUrl = "http://127.0.0.1:4096")
     private var api = HttpOpenCodeApi(currentConfig)
     private val store = AppStateStore(currentConfig)
@@ -61,11 +119,19 @@ class AppViewModel : ViewModel() {
     private val draftBySession = mutableMapOf<String, String>()
     private val modelBySession = mutableMapOf<String, Int>()
     private val agentBySession = mutableMapOf<String, String>()
+    private val messageLimitBySession = mutableMapOf<String, Int>()
+    private val hasMoreHistoryBySession = mutableMapOf<String, Boolean>()
+    private val providerContextLimitByKey = mutableMapOf<String, Int>()
+
+    private val defaultMessageLimit = 6
 
     val state: StateFlow<AppState> = store.state
 
     private val _settingsForm = MutableStateFlow(SettingsForm(baseUrl = currentConfig.baseUrl))
     val settingsForm: StateFlow<SettingsForm> = _settingsForm.asStateFlow()
+
+    private val _speechForm = MutableStateFlow(SpeechForm())
+    val speechForm: StateFlow<SpeechForm> = _speechForm.asStateFlow()
 
     private val _chatInput = MutableStateFlow("")
     val chatInput: StateFlow<String> = _chatInput.asStateFlow()
@@ -91,9 +157,49 @@ class AppViewModel : ViewModel() {
     private val _sshStatus = MutableStateFlow("Disconnected")
     val sshStatus: StateFlow<String> = _sshStatus.asStateFlow()
 
+    private val _isRecording = MutableStateFlow(false)
+    val isRecording: StateFlow<Boolean> = _isRecording.asStateFlow()
+
+    private val _isTranscribing = MutableStateFlow(false)
+    val isTranscribing: StateFlow<Boolean> = _isTranscribing.asStateFlow()
+
+    private val _speechConnectionOk = MutableStateFlow(false)
+    val speechConnectionOk: StateFlow<Boolean> = _speechConnectionOk.asStateFlow()
+
+    private val _speechConnectionError = MutableStateFlow<String?>(null)
+    val speechConnectionError: StateFlow<String?> = _speechConnectionError.asStateFlow()
+
+    private val _isLoadingProviders = MutableStateFlow(false)
+    val isLoadingProviders: StateFlow<Boolean> = _isLoadingProviders.asStateFlow()
+
+    private val _providerConfigError = MutableStateFlow<String?>(null)
+    val providerConfigError: StateFlow<String?> = _providerConfigError.asStateFlow()
+
+    private val _contextUsage = MutableStateFlow<ContextUsageSnapshot?>(null)
+    val contextUsage: StateFlow<ContextUsageSnapshot?> = _contextUsage.asStateFlow()
+
+    private val _isLoadingOlderMessages = MutableStateFlow(false)
+    val isLoadingOlderMessages: StateFlow<Boolean> = _isLoadingOlderMessages.asStateFlow()
+
+    private val _hasMoreHistory = MutableStateFlow(false)
+    val hasMoreHistory: StateFlow<Boolean> = _hasMoreHistory.asStateFlow()
+
+    private val _fileSearchQuery = MutableStateFlow("")
+    val fileSearchQuery: StateFlow<String> = _fileSearchQuery.asStateFlow()
+
+    private val _fileSearchResults = MutableStateFlow<List<String>>(emptyList())
+    val fileSearchResults: StateFlow<List<String>> = _fileSearchResults.asStateFlow()
+
+    private val _sessionDiffs = MutableStateFlow<List<FileDiff>>(emptyList())
+    val sessionDiffs: StateFlow<List<FileDiff>> = _sessionDiffs.asStateFlow()
+
+    private val _canCreateSession = MutableStateFlow(true)
+    val canCreateSession: StateFlow<Boolean> = _canCreateSession.asStateFlow()
+
     val models: List<ModelPreset> = modelPresets
 
     init {
+        hydratePersistedForms()
         refreshAll()
     }
 
@@ -115,6 +221,7 @@ class AppViewModel : ViewModel() {
         val clamped = index.coerceIn(0, modelPresets.lastIndex)
         _selectedModelIndex.value = clamped
         state.value.currentSessionID?.let { sid -> modelBySession[sid] = clamped }
+        recomputeContextUsage()
     }
 
     fun setSelectedAgent(name: String) {
@@ -123,31 +230,98 @@ class AppViewModel : ViewModel() {
         state.value.currentSessionID?.let { sid -> agentBySession[sid] = normalized }
     }
 
-    fun setSshHost(value: String) = _sshForm.update { it.copy(host = value) }
-    fun setSshPort(value: String) = _sshForm.update { it.copy(port = value) }
-    fun setSshUsername(value: String) = _sshForm.update { it.copy(username = value) }
-    fun setSshPassword(value: String) = _sshForm.update { it.copy(password = value) }
-    fun setSshUseKeyAuth(value: Boolean) = _sshForm.update { it.copy(useKeyAuth = value) }
-    fun setSshPrivateKeyPem(value: String) = _sshForm.update { it.copy(privateKeyPem = value) }
-    fun setSshPrivateKeyPassphrase(value: String) = _sshForm.update { it.copy(privateKeyPassphrase = value) }
-    fun setSshRemotePort(value: String) = _sshForm.update { it.copy(remotePort = value) }
-    fun setSshLocalPort(value: String) = _sshForm.update { it.copy(localPort = value) }
+    fun setSshHost(value: String) {
+        _sshForm.update { it.copy(host = value) }
+        localStore.putString(Keys.sshHost, value)
+    }
+
+    fun setSshPort(value: String) {
+        _sshForm.update { it.copy(port = value) }
+        localStore.putString(Keys.sshPort, value)
+    }
+
+    fun setSshUsername(value: String) {
+        _sshForm.update { it.copy(username = value) }
+        localStore.putString(Keys.sshUsername, value)
+    }
+
+    fun setSshPassword(value: String) {
+        _sshForm.update { it.copy(password = value) }
+        secretStore.put(Keys.secretSshPassword, value)
+    }
+
+    fun setSshUseKeyAuth(value: Boolean) {
+        _sshForm.update { it.copy(useKeyAuth = value) }
+        localStore.putString(Keys.sshUseKeyAuth, value.toString())
+    }
+
+    fun setSshPrivateKeyPem(value: String) {
+        _sshForm.update { it.copy(privateKeyPem = value) }
+        secretStore.put(Keys.secretSshPrivateKey, value)
+    }
+
+    fun setSshPrivateKeyPassphrase(value: String) {
+        _sshForm.update { it.copy(privateKeyPassphrase = value) }
+        secretStore.put(Keys.secretSshPassphrase, value)
+    }
+
+    fun setSshRemotePort(value: String) {
+        _sshForm.update { it.copy(remotePort = value) }
+        localStore.putString(Keys.sshRemotePort, value)
+    }
+
+    fun setSshLocalPort(value: String) {
+        _sshForm.update { it.copy(localPort = value) }
+        localStore.putString(Keys.sshLocalPort, value)
+    }
+
+    fun setSpeechBaseUrl(value: String) {
+        _speechForm.update { it.copy(baseUrl = value) }
+        localStore.putString(Keys.speechBaseUrl, value)
+        _speechConnectionOk.value = false
+        _speechConnectionError.value = null
+    }
+
+    fun setSpeechToken(value: String) {
+        _speechForm.update { it.copy(token = value) }
+        secretStore.put(Keys.secretSpeechToken, value)
+        _speechConnectionOk.value = false
+        _speechConnectionError.value = null
+    }
+
+    fun setSpeechCustomPrompt(value: String) {
+        _speechForm.update { it.copy(customPrompt = value) }
+        localStore.putString(Keys.speechPrompt, value)
+    }
+
+    fun setSpeechTerminology(value: String) {
+        _speechForm.update { it.copy(terminology = value) }
+        localStore.putString(Keys.speechTerminology, value)
+    }
 
     fun applySettingsAndReconnect() {
         val normalizedBase = normalizeBaseUrl(_settingsForm.value.baseUrl)
-        currentConfig = ServerConfig(
+        val username = _settingsForm.value.username
+        val password = _settingsForm.value.password
+        localStore.putString(Keys.serverBaseUrl, normalizedBase)
+        localStore.putString(Keys.serverUsername, username)
+        secretStore.put(Keys.secretServerPassword, password)
+        reconfigureApi(
             baseUrl = normalizedBase,
-            username = _settingsForm.value.username.ifBlank { null },
-            password = _settingsForm.value.password.ifBlank { null }
+            username = username.ifBlank { null },
+            password = password.ifBlank { null }
         )
-        api = HttpOpenCodeApi(currentConfig)
-        store.setServerConfig(currentConfig)
         draftBySession.clear()
         modelBySession.clear()
         agentBySession.clear()
+        messageLimitBySession.clear()
+        hasMoreHistoryBySession.clear()
         _chatInput.value = ""
         _selectedModelIndex.value = 0
         _selectedAgentName.value = "build"
+        _sessionDiffs.value = emptyList()
+        _hasMoreHistory.value = false
+        _contextUsage.value = null
         refreshAll()
     }
 
@@ -159,6 +333,7 @@ class AppViewModel : ViewModel() {
                 val health = api.health()
                 store.setConnection(connected = health.healthy, version = health.version, error = null)
 
+                loadProvidersConfig()
                 runCatching { api.projects() }.onSuccess { store.setProjects(it) }
                 runCatching { api.agents() }.onSuccess { agents ->
                     store.setAgents(agents.filter { it.hidden != true })
@@ -174,6 +349,7 @@ class AppViewModel : ViewModel() {
                 loadFileRoot()
                 loadFileStatuses()
                 startSse()
+                recomputeCanCreateSession()
             } catch (e: Exception) {
                 store.setConnection(connected = false, error = e.message)
                 _lastError.value = e.message
@@ -229,6 +405,79 @@ class AppViewModel : ViewModel() {
         }
     }
 
+    fun testSpeechConnection() {
+        val form = _speechForm.value
+        if (form.token.isBlank()) {
+            _speechConnectionOk.value = false
+            _speechConnectionError.value = "AI Builder token is required"
+            return
+        }
+        viewModelScope.launch {
+            _speechConnectionError.value = null
+            runCatching {
+                speechClient.testConnection(
+                    baseUrl = form.baseUrl,
+                    token = form.token
+                )
+            }.onSuccess {
+                _speechConnectionOk.value = true
+            }.onFailure {
+                _speechConnectionOk.value = false
+                _speechConnectionError.value = it.message
+            }
+        }
+    }
+
+    fun startRecording() {
+        viewModelScope.launch {
+            audioRecorder.start(getApplication())
+                .onSuccess {
+                    _isRecording.value = true
+                }
+                .onFailure {
+                    _lastError.value = it.message
+                    _isRecording.value = false
+                }
+        }
+    }
+
+    fun stopRecordingAndTranscribe() {
+        viewModelScope.launch {
+            val file: File? = audioRecorder.stop()
+            _isRecording.value = false
+            if (file == null || !file.exists()) {
+                _lastError.value = "Recording failed: no audio file generated"
+                return@launch
+            }
+            val form = _speechForm.value
+            if (form.token.isBlank()) {
+                _lastError.value = "AI Builder token is required"
+                return@launch
+            }
+            _isTranscribing.value = true
+            runCatching {
+                speechClient.transcribe(
+                    baseUrl = form.baseUrl,
+                    token = form.token,
+                    audioFile = file,
+                    prompt = form.customPrompt.takeIf { it.isNotBlank() },
+                    terms = form.terminology.takeIf { it.isNotBlank() }
+                )
+            }.onSuccess { response ->
+                val transcript = response.text.trim()
+                if (transcript.isNotEmpty()) {
+                    val next = if (_chatInput.value.isBlank()) transcript else "${_chatInput.value} $transcript"
+                    _chatInput.value = next
+                    state.value.currentSessionID?.let { sid -> draftBySession[sid] = next }
+                }
+            }.onFailure {
+                _lastError.value = it.message
+            }
+            _isTranscribing.value = false
+            runCatching { file.delete() }
+        }
+    }
+
     fun loadSessions() {
         viewModelScope.launch {
             runCatching {
@@ -237,6 +486,7 @@ class AppViewModel : ViewModel() {
             }.onSuccess { sessions ->
                 store.setSessions(sessions.sortedByDescending { it.time.updated })
                 restoreSessionScopedSelections(state.value.currentSessionID)
+                recomputeCanCreateSession()
             }.onFailure {
                 _lastError.value = it.message
             }
@@ -245,16 +495,23 @@ class AppViewModel : ViewModel() {
 
     fun selectProject(worktree: String?) {
         store.setSelectedProject(worktree)
+        localStore.putString(Keys.selectedProject, worktree.orEmpty())
+        recomputeCanCreateSession()
         loadSessions()
     }
 
     fun selectSession(sessionID: String) {
         store.setCurrentSession(sessionID)
+        messageLimitBySession.putIfAbsent(sessionID, defaultMessageLimit)
         restoreSessionScopedSelections(sessionID)
         loadCurrentSessionData()
     }
 
     fun createSession() {
+        if (state.value.selectedProjectWorktree != null) {
+            _lastError.value = "Create is allowed only under Server default project"
+            return
+        }
         viewModelScope.launch {
             val title = _sessionTitleInput.value.trim().ifBlank { null }
             runCatching { api.createSession(title) }
@@ -262,6 +519,7 @@ class AppViewModel : ViewModel() {
                     _sessionTitleInput.value = ""
                     loadSessions()
                     store.setCurrentSession(created.id)
+                    messageLimitBySession[created.id] = defaultMessageLimit
                     restoreSessionScopedSelections(created.id)
                     loadCurrentSessionData()
                 }
@@ -291,6 +549,8 @@ class AppViewModel : ViewModel() {
                     draftBySession.remove(sid)
                     modelBySession.remove(sid)
                     agentBySession.remove(sid)
+                    messageLimitBySession.remove(sid)
+                    hasMoreHistoryBySession.remove(sid)
                     loadSessions()
                     store.setCurrentSession(state.value.sessions.firstOrNull()?.id)
                     restoreSessionScopedSelections(state.value.currentSessionID)
@@ -327,6 +587,29 @@ class AppViewModel : ViewModel() {
                 _chatInput.value = text
                 draftBySession[sid] = text
             }
+        }
+    }
+
+    fun loadOlderMessages() {
+        val sid = state.value.currentSessionID ?: return
+        if (_isLoadingOlderMessages.value) return
+        if (hasMoreHistoryBySession[sid] == false) return
+        _isLoadingOlderMessages.value = true
+        messageLimitBySession[sid] = currentMessageLimit(sid) + defaultMessageLimit
+        loadMessages(sid) {
+            _isLoadingOlderMessages.value = false
+        }
+    }
+
+    fun summarizeCurrentSession() {
+        val sid = state.value.currentSessionID ?: return
+        viewModelScope.launch {
+            runCatching { api.summarize(sid) }
+                .onSuccess {
+                    loadMessages(sid)
+                    loadSessionStatuses()
+                }
+                .onFailure { _lastError.value = it.message }
         }
     }
 
@@ -375,21 +658,54 @@ class AppViewModel : ViewModel() {
         }
     }
 
+    fun setFileSearchQuery(value: String) {
+        _fileSearchQuery.value = value
+    }
+
+    fun searchFiles() {
+        val query = _fileSearchQuery.value.trim()
+        if (query.isEmpty()) {
+            _fileSearchResults.value = emptyList()
+            return
+        }
+        viewModelScope.launch {
+            runCatching { api.findFile(query = query, limit = 50) }
+                .onSuccess { _fileSearchResults.value = it }
+                .onFailure { _lastError.value = it.message }
+        }
+    }
+
     fun clearError() {
         _lastError.value = null
     }
 
     private fun loadCurrentSessionData() {
-        val sid = state.value.currentSessionID ?: return
+        val sid = state.value.currentSessionID ?: run {
+            _sessionDiffs.value = emptyList()
+            _hasMoreHistory.value = false
+            _contextUsage.value = null
+            return
+        }
+        messageLimitBySession.putIfAbsent(sid, defaultMessageLimit)
         loadMessages(sid)
         loadSessionTodos(sid)
+        loadSessionDiff(sid)
     }
 
-    private fun loadMessages(sessionID: String) {
+    private fun loadMessages(sessionID: String, onDone: (() -> Unit)? = null) {
         viewModelScope.launch {
-            runCatching { api.messages(sessionID = sessionID, limit = 60) }
-                .onSuccess { store.setMessages(sessionID, it) }
+            val limit = currentMessageLimit(sessionID)
+            runCatching { api.messages(sessionID = sessionID, limit = limit) }
+                .onSuccess { messages ->
+                    store.setMessages(sessionID, messages)
+                    hasMoreHistoryBySession[sessionID] = messages.size >= limit
+                    if (state.value.currentSessionID == sessionID) {
+                        _hasMoreHistory.value = hasMoreHistoryBySession[sessionID] ?: false
+                        recomputeContextUsage()
+                    }
+                }
                 .onFailure { _lastError.value = it.message }
+            onDone?.invoke()
         }
     }
 
@@ -415,6 +731,22 @@ class AppViewModel : ViewModel() {
         }
     }
 
+    private fun loadSessionDiff(sessionID: String) {
+        viewModelScope.launch {
+            runCatching { api.sessionDiff(sessionID) }
+                .onSuccess { diffs ->
+                    if (state.value.currentSessionID == sessionID) {
+                        _sessionDiffs.value = diffs
+                    }
+                }
+                .onFailure {
+                    if (state.value.currentSessionID == sessionID) {
+                        _sessionDiffs.value = emptyList()
+                    }
+                }
+        }
+    }
+
     private fun startSse() {
         sseJob?.cancel()
         sseJob = viewModelScope.launch {
@@ -432,16 +764,152 @@ class AppViewModel : ViewModel() {
         }
     }
 
+    fun loadProvidersConfig() {
+        viewModelScope.launch {
+            _isLoadingProviders.value = true
+            _providerConfigError.value = null
+            runCatching { api.providers() }
+                .onSuccess { response ->
+                    providerContextLimitByKey.clear()
+                    response.providers.forEach { provider ->
+                        provider.models.forEach { (modelID, model) ->
+                            val limit = model.limit?.context
+                            if (limit != null) {
+                                providerContextLimitByKey["${provider.id}/$modelID"] = limit
+                            }
+                        }
+                    }
+                    recomputeContextUsage()
+                }
+                .onFailure { _providerConfigError.value = it.message }
+            _isLoadingProviders.value = false
+        }
+    }
+
     private fun normalizeBaseUrl(raw: String): String {
         val trimmed = raw.trim()
         if (trimmed.isEmpty()) return "http://127.0.0.1:4096"
         return if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) trimmed else "http://$trimmed"
     }
 
+    private fun currentMessageLimit(sessionID: String): Int {
+        return max(defaultMessageLimit, messageLimitBySession[sessionID] ?: defaultMessageLimit)
+    }
+
+    private fun recomputeCanCreateSession() {
+        _canCreateSession.value = state.value.selectedProjectWorktree == null
+    }
+
+    private fun recomputeContextUsage() {
+        val sid = state.value.currentSessionID ?: run {
+            _contextUsage.value = null
+            return
+        }
+        val session = state.value.sessions.firstOrNull { it.id == sid } ?: run {
+            _contextUsage.value = null
+            return
+        }
+        val messages = state.value.messages
+        val lastAssistant = messages.asReversed().firstOrNull { it.info.role == "assistant" && it.info.tokens != null } ?: run {
+            _contextUsage.value = null
+            return
+        }
+
+        val model = lastAssistant.info.model ?: run {
+            val provider = lastAssistant.info.providerID
+            val modelID = lastAssistant.info.modelID
+            if (!provider.isNullOrBlank() && !modelID.isNullOrBlank()) {
+                Message.ModelInfo(providerID = provider, modelID = modelID)
+            } else {
+                null
+            }
+        } ?: run {
+            _contextUsage.value = null
+            return
+        }
+
+        val contextLimit = providerContextLimitByKey["${model.providerID}/${model.modelID}"] ?: run {
+            _contextUsage.value = null
+            return
+        }
+
+        val tokens = lastAssistant.info.tokens ?: run {
+            _contextUsage.value = null
+            return
+        }
+        val input = tokens.input ?: 0
+        val output = tokens.output ?: 0
+        val reasoning = tokens.reasoning ?: 0
+        val cacheRead = tokens.cache?.read ?: 0
+        val cacheWrite = tokens.cache?.write ?: 0
+        val total = tokens.total ?: (input + output + reasoning + cacheRead + cacheWrite)
+        val totalCost = messages.mapNotNull { it.info.cost }.sum().takeIf { it > 0.0 }
+
+        _contextUsage.value = ContextUsageSnapshot(
+            sessionID = sid,
+            sessionTitle = session.title,
+            providerID = model.providerID,
+            modelID = model.modelID,
+            contextLimit = contextLimit,
+            totalTokens = total,
+            inputTokens = input,
+            outputTokens = output,
+            reasoningTokens = reasoning,
+            cacheReadTokens = cacheRead,
+            cacheWriteTokens = cacheWrite,
+            totalSessionCost = totalCost
+        )
+    }
+
+    private fun reconfigureApi(baseUrl: String, username: String?, password: String?) {
+        currentConfig = ServerConfig(baseUrl = baseUrl, username = username, password = password)
+        api = HttpOpenCodeApi(currentConfig)
+        store.setServerConfig(currentConfig)
+        val selectedProject = localStore.getString(Keys.selectedProject).ifBlank { null }
+        store.setSelectedProject(selectedProject)
+    }
+
+    private fun hydratePersistedForms() {
+        val baseUrl = normalizeBaseUrl(localStore.getString(Keys.serverBaseUrl, "http://127.0.0.1:4096"))
+        val username = localStore.getString(Keys.serverUsername)
+        val password = secretStore.get(Keys.secretServerPassword)
+        _settingsForm.value = SettingsForm(baseUrl = baseUrl, username = username, password = password)
+
+        val speechBase = localStore.getString(Keys.speechBaseUrl, "https://space.ai-builders.com/backend")
+        val speechPrompt = localStore.getString(Keys.speechPrompt, SpeechForm().customPrompt)
+        val speechTerms = localStore.getString(Keys.speechTerminology)
+        val speechToken = secretStore.get(Keys.secretSpeechToken)
+        _speechForm.value = SpeechForm(
+            baseUrl = speechBase,
+            token = speechToken,
+            customPrompt = speechPrompt,
+            terminology = speechTerms
+        )
+
+        _sshForm.value = SshForm(
+            host = localStore.getString(Keys.sshHost),
+            port = localStore.getString(Keys.sshPort, "22"),
+            username = localStore.getString(Keys.sshUsername),
+            password = secretStore.get(Keys.secretSshPassword),
+            useKeyAuth = localStore.getString(Keys.sshUseKeyAuth).toBooleanStrictOrNull() ?: false,
+            privateKeyPem = secretStore.get(Keys.secretSshPrivateKey),
+            privateKeyPassphrase = secretStore.get(Keys.secretSshPassphrase),
+            remotePort = localStore.getString(Keys.sshRemotePort, "18080"),
+            localPort = localStore.getString(Keys.sshLocalPort, "14096")
+        )
+
+        reconfigureApi(
+            baseUrl = baseUrl,
+            username = username.ifBlank { null },
+            password = password.ifBlank { null }
+        )
+    }
+
     private fun restoreSessionScopedSelections(sessionID: String?) {
         if (sessionID == null) {
             _chatInput.value = ""
             _selectedModelIndex.value = 0
+            _selectedAgentName.value = state.value.agents.firstOrNull()?.name ?: "build"
             return
         }
         _chatInput.value = draftBySession[sessionID].orEmpty()
@@ -454,6 +922,7 @@ class AppViewModel : ViewModel() {
         super.onCleared()
         sseJob?.cancel()
         viewModelScope.launch {
+            audioRecorder.stop()
             sshManager.disconnect()
         }
     }

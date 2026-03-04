@@ -2,6 +2,7 @@ package ai.opencode.mobile.core.network
 
 import ai.opencode.mobile.core.model.AgentInfo
 import ai.opencode.mobile.core.model.FileContent
+import ai.opencode.mobile.core.model.FileDiff
 import ai.opencode.mobile.core.model.FileNode
 import ai.opencode.mobile.core.model.FileStatusEntry
 import ai.opencode.mobile.core.model.HealthResponse
@@ -103,6 +104,15 @@ class HttpOpenCodeApi(
         }
     }
 
+    override suspend fun summarize(sessionID: String) {
+        val response = request("/session/$sessionID/summarize", "POST")
+        response.use {
+            if (it.code !in 200..299) {
+                throw IOException("summarize failed: ${it.code}")
+            }
+        }
+    }
+
     override suspend fun providers(): ProvidersResponse {
         val raw = request("/config/providers", "GET").use { bodyString(it) }
         return WireParsers.parseProviders(raw)
@@ -111,6 +121,8 @@ class HttpOpenCodeApi(
     override suspend fun agents(): List<AgentInfo> = get("/agent")
 
     override suspend fun sessionTodos(sessionID: String): List<TodoItem> = get("/session/$sessionID/todo")
+
+    override suspend fun sessionDiff(sessionID: String): List<FileDiff> = get("/session/$sessionID/diff")
 
     override suspend fun fileList(path: String): List<FileNode> {
         val url = config.baseUrl.toHttpUrl().newBuilder()
