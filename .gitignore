@@ -54,6 +54,8 @@ Thumbs.db
 .gradle/
 local.properties
 **/build/
+**/.kotlin/
+hs_err_pid*.log
 
 # HarmonyOS NEXT
 **/node_modules/
