@@ -51,7 +51,22 @@ export interface MessageInfo {
   providerID?: string
   modelID?: string
   model?: MessageModelInfo
+  tokens?: TokenInfo
+  cost?: number
   time: MessageTimeInfo
+}
+
+export interface TokenCacheInfo {
+  read?: number
+  write?: number
+}
+
+export interface TokenInfo {
+  total?: number
+  input?: number
+  output?: number
+  reasoning?: number
+  cache?: TokenCacheInfo
 }
 
 export interface Part {
@@ -121,6 +136,66 @@ export interface FileStatusEntry {
   status?: string
 }
 
+export interface FileDiff {
+  file: string
+  before: string
+  after: string
+  additions?: number
+  deletions?: number
+  status?: string
+}
+
+export interface ProviderModelLimit {
+  context?: number
+  input?: number
+  output?: number
+}
+
+export interface ProviderModel {
+  id: string
+  name?: string
+  providerID?: string
+  limit?: ProviderModelLimit
+}
+
+export interface ConfigProvider {
+  id: string
+  name?: string
+  models: Record<string, ProviderModel>
+}
+
+export interface ProvidersResponse {
+  providers: Array<ConfigProvider>
+}
+
+export interface ContextUsageSnapshot {
+  sessionID: string
+  sessionTitle: string
+  providerID: string
+  modelID: string
+  contextLimit: number
+  totalTokens: number
+  inputTokens: number
+  outputTokens: number
+  reasoningTokens: number
+  cacheReadTokens: number
+  cacheWriteTokens: number
+  totalSessionCost?: number
+  usageRatio: number
+}
+
+export interface SshTunnelConfig {
+  enabled: boolean
+  host: string
+  port: number
+  username: string
+  password?: string
+  privateKey?: string
+  passphrase?: string
+  remotePort: number
+  localPort: number
+}
+
 export interface AppState {
   serverBaseUrl: string
   connected: boolean
@@ -141,4 +216,21 @@ export interface AppState {
   fileStatuses: Array<FileStatusEntry>
   selectedFilePath?: string
   selectedFileContent?: FileContent
+  providerContextLimits: Record<string, number>
+  providerConfigError?: string
+  contextUsage?: ContextUsageSnapshot
+  messageLimitBySession: Record<string, number>
+  hasMoreHistoryBySession: Record<string, boolean>
+  loadingOlderMessages: boolean
+  sessionDiffs: Array<FileDiff>
+  fileSearchQuery: string
+  fileSearchResults: Array<string>
+  speechBaseUrl: string
+  speechToken: string
+  speechPrompt: string
+  speechTerminology: string
+  speechConnectionOk: boolean
+  speechConnectionError?: string
+  sshConfig: SshTunnelConfig
+  sshStatus: string
 }

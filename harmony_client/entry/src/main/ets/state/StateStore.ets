@@ -1,7 +1,9 @@
 import {
   AppState,
   AgentInfo,
+  ContextUsageSnapshot,
   FileContent,
+  FileDiff,
   FileNode,
   FileStatusEntry,
   MessageWithParts,
@@ -9,6 +11,7 @@ import {
   Project,
   Session,
   SessionStatus,
+  SshTunnelConfig,
   SseEvent,
   TodoItem
 } from '../model/Models'
@@ -38,7 +41,24 @@ export class StateStore {
       todosBySession: {},
       filePath: '',
       fileNodes: [],
-      fileStatuses: []
+      fileStatuses: [],
+      providerContextLimits: {},
+      providerConfigError: undefined,
+      contextUsage: undefined,
+      messageLimitBySession: {},
+      hasMoreHistoryBySession: {},
+      loadingOlderMessages: false,
+      sessionDiffs: [],
+      fileSearchQuery: '',
+      fileSearchResults: [],
+      speechBaseUrl: 'https://space.ai-builders.com/backend',
+      speechToken: '',
+      speechPrompt: 'Prefer snake_case filenames and keep code terms unchanged.',
+      speechTerminology: '',
+      speechConnectionOk: false,
+      speechConnectionError: undefined,
+      sshConfig: this.defaultSshConfig(),
+      sshStatus: 'Disconnected'
     }
   }
 
@@ -70,7 +90,18 @@ export class StateStore {
       fileNodes: [],
       fileStatuses: [],
       selectedFilePath: undefined,
-      selectedFileContent: undefined
+      selectedFileContent: undefined,
+      providerContextLimits: {},
+      providerConfigError: undefined,
+      contextUsage: undefined,
+      messageLimitBySession: {},
+      hasMoreHistoryBySession: {},
+      loadingOlderMessages: false,
+      sessionDiffs: [],
+      fileSearchQuery: '',
+      fileSearchResults: [],
+      speechConnectionOk: false,
+      speechConnectionError: undefined
     }
     this.notify()
   }
@@ -178,6 +209,111 @@ export class StateStore {
     this.notify()
   }
 
+  setProviderContextLimits(limits: Record<string, number>, error?: string): void {
+    this.state = {
+      ...this.state,
+      providerContextLimits: limits,
+      providerConfigError: error
+    }
+    this.notify()
+  }
+
+  setContextUsage(snapshot?: ContextUsageSnapshot): void {
+    this.state = {
+      ...this.state,
+      contextUsage: snapshot
+    }
+    this.notify()
+  }
+
+  setMessageLimit(sessionID: string, limit: number): void {
+    this.state = {
+      ...this.state,
+      messageLimitBySession: {
+        ...this.state.messageLimitBySession,
+        [sessionID]: limit
+      }
+    }
+    this.notify()
+  }
+
+  setHasMoreHistory(sessionID: string, hasMore: boolean): void {
+    this.state = {
+      ...this.state,
+      hasMoreHistoryBySession: {
+        ...this.state.hasMoreHistoryBySession,
+        [sessionID]: hasMore
+      }
+    }
+    this.notify()
+  }
+
+  setLoadingOlderMessages(loading: boolean): void {
+    this.state = {
+      ...this.state,
+      loadingOlderMessages: loading
+    }
+    this.notify()
+  }
+
+  setSessionDiffs(diffs: Array<FileDiff>): void {
+    this.state = {
+      ...this.state,
+      sessionDiffs: diffs
+    }
+    this.notify()
+  }
+
+  setFileSearch(query: string, results: Array<string>): void {
+    this.state = {
+      ...this.state,
+      fileSearchQuery: query,
+      fileSearchResults: results
+    }
+    this.notify()
+  }
+
+  setSpeechConfig(
+    baseUrl: string,
+    token: string,
+    prompt: string,
+    terminology: string
+  ): void {
+    this.state = {
+      ...this.state,
+      speechBaseUrl: baseUrl,
+      speechToken: token,
+      speechPrompt: prompt,
+      speechTerminology: terminology
+    }
+    this.notify()
+  }
+
+  setSpeechConnection(ok: boolean, error?: string): void {
+    this.state = {
+      ...this.state,
+      speechConnectionOk: ok,
+      speechConnectionError: error
+    }
+    this.notify()
+  }
+
+  setSshConfig(config: SshTunnelConfig): void {
+    this.state = {
+      ...this.state,
+      sshConfig: config
+    }
+    this.notify()
+  }
+
+  setSshStatus(status: string): void {
+    this.state = {
+      ...this.state,
+      sshStatus: status
+    }
+    this.notify()
+  }
+
   removeSession(sessionID: string): void {
     const nextSessions = this.state.sessions.filter((s) => s.id !== sessionID)
     const nextCurrent = this.state.currentSessionID === sessionID ? nextSessions[0]?.id : this.state.currentSessionID
@@ -185,12 +321,18 @@ export class StateStore {
     delete nextStatuses[sessionID]
     const nextTodos = { ...this.state.todosBySession }
     delete nextTodos[sessionID]
+    const nextLimits = { ...this.state.messageLimitBySession }
+    delete nextLimits[sessionID]
+    const nextHasMore = { ...this.state.hasMoreHistoryBySession }
+    delete nextHasMore[sessionID]
     this.state = {
       ...this.state,
       sessions: nextSessions,
       currentSessionID: nextCurrent,
       sessionStatuses: nextStatuses,
       todosBySession: nextTodos,
+      messageLimitBySession: nextLimits,
+      hasMoreHistoryBySession: nextHasMore,
       pendingPermissions: this.state.pendingPermissions.filter((p) => p.sessionID !== sessionID)
     }
     this.notify()
@@ -320,6 +462,20 @@ export class StateStore {
     return SseSideEffect.None
   }
 
+  private defaultSshConfig(): SshTunnelConfig {
+    return {
+      enabled: false,
+      host: '',
+      port: 22,
+      username: '',
+      password: '',
+      privateKey: '',
+      passphrase: '',
+      remotePort: 18080,
+      localPort: 14096
+    }
+  }
+
   private getString(input: Object | string | number | boolean | undefined): string | undefined {
     if (typeof input === 'string') return input
     return undefined
@@ -344,4 +500,3 @@ export class StateStore {
     this.listeners.forEach((listener) => listener(this.state))
   }
 }
-

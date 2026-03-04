@@ -2,6 +2,7 @@ package ai.opencode.mobile.core.network
 
 import ai.opencode.mobile.core.model.AgentInfo
 import ai.opencode.mobile.core.model.FileContent
+import ai.opencode.mobile.core.model.FileDiff
 import ai.opencode.mobile.core.model.FileNode
 import ai.opencode.mobile.core.model.FileStatusEntry
 import ai.opencode.mobile.core.model.HealthResponse
@@ -39,9 +40,11 @@ interface OpenCodeApi {
     suspend fun messages(sessionID: String, limit: Int? = null): List<MessageWithParts>
     suspend fun promptAsync(sessionID: String, text: String, agent: String, model: Message.ModelInfo? = null)
     suspend fun abort(sessionID: String)
+    suspend fun summarize(sessionID: String)
     suspend fun providers(): ProvidersResponse
     suspend fun agents(): List<AgentInfo>
     suspend fun sessionTodos(sessionID: String): List<TodoItem>
+    suspend fun sessionDiff(sessionID: String): List<FileDiff>
     suspend fun fileList(path: String = ""): List<FileNode>
     suspend fun fileContent(path: String): FileContent
     suspend fun fileStatus(): List<FileStatusEntry>

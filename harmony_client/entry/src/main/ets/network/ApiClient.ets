@@ -1,10 +1,13 @@
 import {
   AgentInfo,
   FileContent,
+  FileDiff,
   FileNode,
   FileStatusEntry,
   HealthResponse,
+  MessageModelInfo,
   MessageWithParts,
+  ProvidersResponse,
   Project,
   Session,
   SessionStatus,
@@ -75,16 +78,39 @@ export class ApiClient {
     return this.parseMessagesPayload(raw)
   }
 
-  async promptAsync(sessionID: string, text: string, agent: string): Promise<void> {
-    const body = {
+  async promptAsync(sessionID: string, text: string, agent: string, model?: MessageModelInfo): Promise<void> {
+    const body: Record<string, Object | string> = {
       parts: [{ type: 'text', text: text }],
       agent: agent
+    }
+    if (model) {
+      body['model'] = model
     }
     await this.sendJson(`/session/${sessionID}/prompt_async`, 'POST', body, 204)
   }
 
   async abort(sessionID: string): Promise<void> {
     await this.sendJson(`/session/${sessionID}/abort`, 'POST', {}, 200)
+  }
+
+  async summarize(sessionID: string): Promise<void> {
+    await this.sendJson(`/session/${sessionID}/summarize`, 'POST', {}, 200)
+  }
+
+  async providers(): Promise<ProvidersResponse> {
+    const raw = await this.getText('/config/providers')
+    const parsed = JSON.parse(raw) as Record<string, Object>
+    const providersRaw = parsed['providers']
+    let providers: Array<Object> = []
+    if (Array.isArray(providersRaw)) {
+      providers = providersRaw
+    } else if (providersRaw && typeof providersRaw === 'object') {
+      providers = Object.keys(providersRaw as Record<string, Object>).map((id) => {
+        const item = (providersRaw as Record<string, Object>)[id] as Record<string, Object>
+        return { id: (item['id'] as string) ?? id, ...item }
+      })
+    }
+    return { providers: providers as any }
   }
 
   async agents(): Promise<Array<AgentInfo>> {
@@ -109,6 +135,14 @@ export class ApiClient {
 
   async fileStatus(): Promise<Array<FileStatusEntry>> {
     return this.getJson<Array<FileStatusEntry>>('/file/status')
+  }
+
+  async sessionDiff(sessionID: string): Promise<Array<FileDiff>> {
+    return this.getJson<Array<FileDiff>>(`/session/${sessionID}/diff`)
+  }
+
+  async findFile(query: string, limit: number = 50): Promise<Array<string>> {
+    return this.getJson<Array<string>>(`/find/file?query=${encodeURIComponent(query)}&limit=${limit}`)
   }
 
   private async getText(path: string): Promise<string> {
@@ -243,4 +277,3 @@ export class ApiClient {
     return output
   }
 }
-

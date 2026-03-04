@@ -174,6 +174,16 @@ data class FileStatusEntry(
 )
 
 @Serializable
+data class FileDiff(
+    val file: String = "",
+    val before: String = "",
+    val after: String = "",
+    val additions: Int = 0,
+    val deletions: Int = 0,
+    val status: String? = null
+)
+
+@Serializable
 data class ProviderModelLimit(
     val context: Int? = null,
     val input: Int? = null,
@@ -205,4 +215,3 @@ data class ProvidersResponse(
     val providers: List<ConfigProvider>,
     val default: DefaultProvider?
 )
-

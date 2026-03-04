@@ -1,6 +1,6 @@
 # Mobile Cross-Platform Implementation
 
-Last updated: 2026-03-04
+Last updated: 2026-03-05
 
 ## Branch Strategy
 
@@ -35,12 +35,17 @@ Last updated: 2026-03-04
   - Compose app with functional Chat/Files/Settings tabs
   - session chips + create/rename/delete session
   - message send/abort + message part rendering + streaming delta display
+  - message history paging (`limit` incremental load older flow)
+  - compact session action (`POST /session/:id/summarize`)
   - permission cards (allow once/always/reject)
   - session-scoped draft/model/agent memory
+  - context usage snapshot + threshold ring (provider config + token/cost breakdown)
+  - speech recording + AI Builder transcription append-to-input flow
   - session todo panel and session busy status chips
-  - file tree loading + file content preview
-  - connection/settings form + project selection
+  - file tree loading + file content preview + search + session diff preview
+  - connection/settings form + project selection + create restriction hint
   - built-in SSH tunnel (password or key-auth local port forwarding to VPS remote port)
+  - encrypted local secret storage for server password / speech token / SSH credentials
   - ViewModel orchestration with full refresh + SSE side-effect reloads
 
 ### Local environment validation (Windows)
@@ -75,16 +80,21 @@ Helper script:
 - Stage-model project scaffolding
 - ArkTS model, API client, and state reducer expanded to session/message/file/permission scopes
 - Added `AppController` orchestration for refresh/session/message/file actions
+- Added model preset selection + session-scoped model mapping in controller
+- Added message history paging (`limit` incremental load older flow)
+- Added compact session action (`POST /session/:id/summarize`)
+- Added provider config loading + context usage snapshot calculation
+- Added session diff + file search API wiring and UI actions
+- Added speech settings + AI Builder connection test wiring
+- Added SSH config/status state and in-app connect/disconnect workflow entrypoints
 - Added V1 polling fallback (3s) for status/message sync when SSE transport adapter is unavailable
 - `SseClient` now attempts streaming SSE via fetch readable stream, with fallback to polling
 - ArkUI entry page upgraded from shell to interactive 3-tab app:
-  - Chat: session list/create/rename/delete, send/abort, permission actions
-  - Files: path load, node navigation, preview panel
-  - Settings: server/apply/refresh, project picker
-- External tunnel mode explicitly noted for V1
+  - Chat: session list/create/rename/delete/compact, model+agent select, load older, send/abort, permission actions
+  - Files: path load, search, node navigation, content/diff preview
+  - Settings: server/apply/refresh, speech config+test, project picker, SSH config panel
 
 ## Not completed yet
 
-- Android SSH key persistence in secure storage (V1 supports key auth input but does not persist key material)
-- Harmony built-in SSH tunnel (deferred by agreed plan)
 - Harmony end-to-end device test reports / hap build output (DevEco hvigor wrapper not available in current environment)
+- Harmony real SSH transport implementation (current connect flow configures local-forward endpoint and status, but transport layer still requires platform-specific SSH backend validation)
