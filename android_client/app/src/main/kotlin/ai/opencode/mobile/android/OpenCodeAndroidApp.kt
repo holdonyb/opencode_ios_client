@@ -24,8 +24,12 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Chat
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.AccountTree
 import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.FolderOpen
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Settings
@@ -63,12 +67,26 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
 import ai.opencode.mobile.android.ui.AppViewModel
 import ai.opencode.mobile.core.model.Part
+import ai.opencode.mobile.core.model.Project
+import ai.opencode.mobile.core.model.Session
+import ai.opencode.mobile.core.model.SessionStatus
 import ai.opencode.mobile.core.state.AppState
+
+private data class ProjectSessionGroupUi(
+    val key: String,
+    val title: String,
+    val roots: List<SessionNodeUi>
+)
+
+private data class SessionNodeUi(
+    val session: Session,
+    val children: List<SessionNodeUi>
+)
 
 @Composable
 fun OpenCodeAndroidApp(vm: AppViewModel = viewModel()) {
     var selectedIndex by remember { mutableIntStateOf(0) }
-    val titles = listOf("Chat", "Files", "Settings")
+    val titles = listOf("Chat", "Sessions", "Files", "Settings")
     val state by vm.state.collectAsState()
     val isRefreshing by vm.isRefreshing.collectAsState()
     val error by vm.lastError.collectAsState()
@@ -114,12 +132,18 @@ fun OpenCodeAndroidApp(vm: AppViewModel = viewModel()) {
                 NavigationBarItem(
                     selected = selectedIndex == 1,
                     onClick = { selectedIndex = 1 },
-                    icon = { Icon(Icons.Default.Folder, contentDescription = "Files") },
-                    label = { Text("Files") }
+                    icon = { Icon(Icons.Default.AccountTree, contentDescription = "Sessions") },
+                    label = { Text("Sessions") }
                 )
                 NavigationBarItem(
                     selected = selectedIndex == 2,
                     onClick = { selectedIndex = 2 },
+                    icon = { Icon(Icons.Default.Folder, contentDescription = "Files") },
+                    label = { Text("Files") }
+                )
+                NavigationBarItem(
+                    selected = selectedIndex == 3,
+                    onClick = { selectedIndex = 3 },
                     icon = { Icon(Icons.Default.Settings, contentDescription = "Settings") },
                     label = { Text("Settings") }
                 )
@@ -167,7 +191,8 @@ fun OpenCodeAndroidApp(vm: AppViewModel = viewModel()) {
 
             when (selectedIndex) {
                 0 -> ChatScreen(vm = vm, state = state, onMicClick = onMicClick)
-                1 -> FilesScreen(vm = vm, state = state)
+                1 -> SessionsScreen(vm = vm, state = state)
+                2 -> FilesScreen(vm = vm, state = state)
                 else -> SettingsScreen(vm, state)
             }
         }
@@ -177,10 +202,8 @@ fun OpenCodeAndroidApp(vm: AppViewModel = viewModel()) {
 @Composable
 private fun ChatScreen(vm: AppViewModel, state: AppState, onMicClick: () -> Unit) {
     val chatInput by vm.chatInput.collectAsState()
-    val sessionTitleInput by vm.sessionTitleInput.collectAsState()
     val selectedModelIndex by vm.selectedModelIndex.collectAsState()
     val selectedAgentName by vm.selectedAgentName.collectAsState()
-    val canCreateSession by vm.canCreateSession.collectAsState()
     val contextUsage by vm.contextUsage.collectAsState()
     val hasMoreHistory by vm.hasMoreHistory.collectAsState()
     val isLoadingOlderMessages by vm.isLoadingOlderMessages.collectAsState()
@@ -188,64 +211,59 @@ private fun ChatScreen(vm: AppViewModel, state: AppState, onMicClick: () -> Unit
     val isTranscribing by vm.isTranscribing.collectAsState()
     val providerError by vm.providerConfigError.collectAsState()
     val models = vm.models
+    val currentSession = remember(state.currentSessionID, state.sessions) {
+        state.sessions.firstOrNull { it.id == state.currentSessionID }
+    }
 
     Column(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxSize()) {
-        Text("Sessions", style = MaterialTheme.typography.titleMedium)
-        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            items(state.sessions, key = { it.id }) { session ->
-                val status = state.sessionStatuses[session.id]?.type ?: "idle"
-                val statusTag = when (status) {
-                    "busy", "retry" -> " ●"
-                    else -> ""
-                }
-                FilterChip(
-                    selected = state.currentSessionID == session.id,
-                    onClick = { vm.selectSession(session.id) },
-                    label = { Text(session.title.ifBlank { session.id.take(8) } + statusTag) }
+        Card(modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text("Current session", style = MaterialTheme.typography.titleSmall)
+                Text(
+                    currentSession?.title?.ifBlank { currentSession.id.take(8) } ?: "No session selected",
+                    style = MaterialTheme.typography.bodyMedium
                 )
+                if (currentSession == null) {
+                    Text(
+                        "Go to Sessions tab to choose or create one.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
             }
         }
 
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-            OutlinedTextField(
-                value = sessionTitleInput,
-                onValueChange = vm::setSessionTitleInput,
-                label = { Text("New session title") },
-                modifier = Modifier.weight(1f),
-                singleLine = true
-            )
-            Button(onClick = { vm.createSession() }, enabled = state.isConnected && canCreateSession) {
-                Text("Create")
-            }
-            OutlinedButton(onClick = { vm.renameCurrentSession() }, enabled = state.currentSessionID != null) {
-                Text("Rename")
-            }
-            OutlinedButton(onClick = { vm.deleteCurrentSession() }, enabled = state.currentSessionID != null) {
-                Text("Delete")
-            }
-        }
-
-        if (!canCreateSession) {
-            Text(
-                "Create session is disabled when a project is explicitly selected.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.error
-            )
-        }
-
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-            OutlinedButton(onClick = { vm.summarizeCurrentSession() }, enabled = state.currentSessionID != null) {
-                Text("Compact")
-            }
-            OutlinedButton(onClick = { vm.loadOlderMessages() }, enabled = state.currentSessionID != null && (hasMoreHistory || isLoadingOlderMessages)) {
+            OutlinedButton(
+                onClick = { vm.loadOlderMessages() },
+                enabled = state.currentSessionID != null && (hasMoreHistory || isLoadingOlderMessages),
+                modifier = Modifier.weight(1f)
+            ) {
                 if (isLoadingOlderMessages) {
                     CircularProgressIndicator(modifier = Modifier.width(16.dp), strokeWidth = 2.dp)
                 } else {
                     Text("Load older")
                 }
             }
-            OutlinedButton(onClick = { vm.loadProvidersConfig() }) {
+            OutlinedButton(
+                onClick = { vm.summarizeCurrentSession() },
+                enabled = state.currentSessionID != null,
+                modifier = Modifier.weight(1f)
+            ) {
+                Text("Compact")
+            }
+        }
+
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+            OutlinedButton(onClick = { vm.loadProvidersConfig() }, modifier = Modifier.weight(1f)) {
                 Text("Refresh context")
+            }
+            OutlinedButton(
+                onClick = { vm.abortCurrentSession() },
+                enabled = state.currentSessionID != null,
+                modifier = Modifier.weight(1f)
+            ) {
+                Text("Abort")
             }
         }
 
@@ -397,34 +415,298 @@ private fun ChatScreen(vm: AppViewModel, state: AppState, onMicClick: () -> Unit
             }
         }
 
+        OutlinedTextField(
+            value = chatInput,
+            onValueChange = vm::setChatInput,
+            label = { Text("Message") },
+            modifier = Modifier.fillMaxWidth(),
+            enabled = state.currentSessionID != null,
+            keyboardActions = KeyboardActions(onSend = { vm.sendMessage() }),
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text),
+            minLines = 2,
+            maxLines = 5
+        )
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            OutlinedTextField(
-                value = chatInput,
-                onValueChange = vm::setChatInput,
-                label = { Text("Message") },
-                modifier = Modifier.weight(1f),
-                keyboardActions = KeyboardActions(onSend = { vm.sendMessage() }),
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text)
-            )
-            IconButton(onClick = { vm.sendMessage() }, enabled = state.currentSessionID != null && state.isConnected) {
+            Button(
+                onClick = { vm.sendMessage() },
+                enabled = state.currentSessionID != null && state.isConnected,
+                modifier = Modifier.weight(1f)
+            ) {
                 Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send")
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("Send")
             }
-            IconButton(
+            OutlinedButton(
                 onClick = onMicClick,
-                enabled = state.currentSessionID != null && !isTranscribing
+                enabled = state.currentSessionID != null && !isTranscribing,
+                modifier = Modifier.weight(1f)
             ) {
                 when {
-                    isTranscribing -> CircularProgressIndicator(modifier = Modifier.width(18.dp), strokeWidth = 2.dp)
-                    isRecording -> Icon(Icons.Default.Stop, contentDescription = "Stop recording", tint = Color(0xFFC62828))
-                    else -> Icon(Icons.Default.Mic, contentDescription = "Record voice")
+                    isTranscribing -> {
+                        CircularProgressIndicator(modifier = Modifier.width(16.dp), strokeWidth = 2.dp)
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Transcribing")
+                    }
+                    isRecording -> {
+                        Icon(Icons.Default.Stop, contentDescription = "Stop recording", tint = Color(0xFFC62828))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Stop")
+                    }
+                    else -> {
+                        Icon(Icons.Default.Mic, contentDescription = "Record voice")
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Voice")
+                    }
                 }
             }
-            OutlinedButton(onClick = { vm.abortCurrentSession() }, enabled = state.currentSessionID != null) {
-                Text("Abort")
+        }
+    }
+}
+
+@Composable
+private fun SessionsScreen(vm: AppViewModel, state: AppState) {
+    val sessionTitleInput by vm.sessionTitleInput.collectAsState()
+    val canCreateSession by vm.canCreateSession.collectAsState()
+    val hasMoreHistory by vm.hasMoreHistory.collectAsState()
+    val isLoadingOlderMessages by vm.isLoadingOlderMessages.collectAsState()
+    val expandedProjectIDs by vm.expandedProjectIDs.collectAsState()
+    val expandedSessionIDs by vm.expandedSessionIDs.collectAsState()
+
+    val projectGroups = remember(state.sessions, state.projects) {
+        buildProjectSessionGroups(state.sessions, state.projects)
+    }
+
+    Column(modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Card(modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Project filter", style = MaterialTheme.typography.titleSmall)
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                    item("default") {
+                        AssistChip(
+                            onClick = { vm.selectProject(null) },
+                            label = {
+                                Text(
+                                    if (state.selectedProjectWorktree == null) {
+                                        "Server default (selected)"
+                                    } else {
+                                        "Server default"
+                                    }
+                                )
+                            }
+                        )
+                    }
+                    items(state.projects, key = { it.id }) { project ->
+                        AssistChip(
+                            onClick = { vm.selectProject(project.worktree) },
+                            label = {
+                                Text(
+                                    if (state.selectedProjectWorktree == project.worktree) {
+                                        "${project.worktree} (selected)"
+                                    } else {
+                                        project.worktree
+                                    }
+                                )
+                            }
+                        )
+                    }
+                }
+
+                OutlinedTextField(
+                    value = sessionTitleInput,
+                    onValueChange = vm::setSessionTitleInput,
+                    label = { Text("Session title") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                    Button(
+                        onClick = { vm.createSession() },
+                        enabled = state.isConnected && canCreateSession,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("Create")
+                    }
+                    OutlinedButton(
+                        onClick = { vm.renameCurrentSession() },
+                        enabled = state.currentSessionID != null,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("Rename")
+                    }
+                    OutlinedButton(
+                        onClick = { vm.deleteCurrentSession() },
+                        enabled = state.currentSessionID != null,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("Delete")
+                    }
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                    OutlinedButton(
+                        onClick = { vm.summarizeCurrentSession() },
+                        enabled = state.currentSessionID != null,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("Compact")
+                    }
+                    OutlinedButton(
+                        onClick = { vm.loadOlderMessages() },
+                        enabled = state.currentSessionID != null && (hasMoreHistory || isLoadingOlderMessages),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        if (isLoadingOlderMessages) {
+                            CircularProgressIndicator(modifier = Modifier.width(14.dp), strokeWidth = 2.dp)
+                        } else {
+                            Text("Load older")
+                        }
+                    }
+                    OutlinedButton(onClick = { vm.refreshAll() }, modifier = Modifier.weight(1f)) {
+                        Text("Refresh")
+                    }
+                }
+
+                if (!canCreateSession) {
+                    Text(
+                        "Create session is disabled because project filter is active.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                }
+            }
+        }
+
+        if (projectGroups.isEmpty()) {
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Text(
+                    "No sessions available.",
+                    modifier = Modifier.padding(12.dp),
+                    style = MaterialTheme.typography.bodyMedium
+                )
+            }
+        } else {
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                items(projectGroups, key = { it.key }) { group ->
+                    val isProjectExpanded = expandedProjectIDs.contains(group.key)
+                    Card(modifier = Modifier.fillMaxWidth()) {
+                        Column(modifier = Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { vm.toggleProjectExpanded(group.key) }
+                                    .padding(4.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Icon(
+                                    if (isProjectExpanded) Icons.Default.KeyboardArrowDown else Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                                    contentDescription = if (isProjectExpanded) "Collapse" else "Expand"
+                                )
+                                Icon(
+                                    if (isProjectExpanded) Icons.Default.FolderOpen else Icons.Default.Folder,
+                                    contentDescription = null
+                                )
+                                Text(group.title, style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
+                                Text("${group.roots.size}", style = MaterialTheme.typography.labelMedium)
+                            }
+
+                            if (isProjectExpanded) {
+                                if (group.roots.isEmpty()) {
+                                    Text(
+                                        "No sessions in this project.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.padding(start = 10.dp)
+                                    )
+                                } else {
+                                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                        group.roots.forEach { root ->
+                                            SessionTreeNode(
+                                                node = root,
+                                                depth = 0,
+                                                currentSessionID = state.currentSessionID,
+                                                statuses = state.sessionStatuses,
+                                                expandedSessionIDs = expandedSessionIDs,
+                                                onToggle = vm::toggleSessionExpanded,
+                                                onSelect = vm::selectSession
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SessionTreeNode(
+    node: SessionNodeUi,
+    depth: Int,
+    currentSessionID: String?,
+    statuses: Map<String, SessionStatus>,
+    expandedSessionIDs: Set<String>,
+    onToggle: (String) -> Unit,
+    onSelect: (String) -> Unit
+) {
+    val hasChildren = node.children.isNotEmpty()
+    val isExpanded = expandedSessionIDs.contains(node.session.id)
+    val isSelected = currentSessionID == node.session.id
+    val status = statuses[node.session.id]?.type ?: "idle"
+    val statusColor = when (status) {
+        "busy", "retry" -> Color(0xFFEF6C00)
+        "error", "failed" -> Color(0xFFC62828)
+        else -> MaterialTheme.colorScheme.onSurfaceVariant
+    }
+
+    Column {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { onSelect(node.session.id) }
+                .padding(start = (depth * 14).dp, top = 4.dp, bottom = 4.dp, end = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            if (hasChildren) {
+                IconButton(onClick = { onToggle(node.session.id) }, modifier = Modifier.width(24.dp)) {
+                    Icon(
+                        if (isExpanded) Icons.Default.KeyboardArrowDown else Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                        contentDescription = if (isExpanded) "Collapse session" else "Expand session"
+                    )
+                }
+            } else {
+                Spacer(modifier = Modifier.width(24.dp))
+            }
+            Text(
+                text = node.session.title.ifBlank { node.session.id.take(8) },
+                style = if (isSelected) MaterialTheme.typography.bodyMedium else MaterialTheme.typography.bodySmall,
+                color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.weight(1f)
+            )
+            Text(status, style = MaterialTheme.typography.labelSmall, color = statusColor)
+        }
+
+        if (hasChildren && isExpanded) {
+            node.children.forEach { child ->
+                SessionTreeNode(
+                    node = child,
+                    depth = depth + 1,
+                    currentSessionID = currentSessionID,
+                    statuses = statuses,
+                    expandedSessionIDs = expandedSessionIDs,
+                    onToggle = onToggle,
+                    onSelect = onSelect
+                )
             }
         }
     }
@@ -783,4 +1065,63 @@ private fun SettingsScreen(vm: AppViewModel, state: AppState) {
         Text("Sessions: ${state.sessions.size}")
         Text("Agents: ${state.agents.size}")
     }
+}
+
+private fun buildProjectSessionGroups(
+    sessions: List<Session>,
+    projects: List<Project>
+): List<ProjectSessionGroupUi> {
+    if (sessions.isEmpty()) return emptyList()
+
+    val projectsById = projects.associateBy { it.id }
+    val grouped = sessions.groupBy {
+        if (it.projectID.isBlank()) AppViewModel.UNASSIGNED_PROJECT_KEY else it.projectID
+    }
+
+    val orderedKeys = buildList {
+        projects.forEach { project ->
+            if (grouped.containsKey(project.id)) add(project.id)
+        }
+        grouped.keys
+            .filter { it !in this }
+            .sorted()
+            .forEach { add(it) }
+    }
+
+    return orderedKeys.map { key ->
+        val title = when (key) {
+            AppViewModel.UNASSIGNED_PROJECT_KEY -> "Unassigned"
+            else -> projectsById[key]?.worktree ?: key
+        }
+        val roots = buildSessionForest(grouped[key].orEmpty())
+        ProjectSessionGroupUi(
+            key = key,
+            title = title,
+            roots = roots
+        )
+    }
+}
+
+private fun buildSessionForest(sessions: List<Session>): List<SessionNodeUi> {
+    if (sessions.isEmpty()) return emptyList()
+    val byId = sessions.associateBy { it.id }
+    val childrenMap = mutableMapOf<String?, MutableList<Session>>()
+    sessions.forEach { session ->
+        val parent = session.parentID?.takeIf { byId.containsKey(it) }
+        childrenMap.getOrPut(parent) { mutableListOf() }.add(session)
+    }
+
+    fun build(parentID: String?): List<SessionNodeUi> {
+        return childrenMap[parentID]
+            .orEmpty()
+            .sortedByDescending { it.time.updated }
+            .map { session ->
+                SessionNodeUi(
+                    session = session,
+                    children = build(session.id)
+                )
+            }
+    }
+
+    return build(null)
 }

@@ -27,6 +27,10 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 class AppViewModel(application: Application) : AndroidViewModel(application) {
+    companion object {
+        const val UNASSIGNED_PROJECT_KEY = "__unassigned__"
+    }
+
     data class SettingsForm(
         val baseUrl: String = "http://127.0.0.1:4096",
         val username: String = "",
@@ -195,6 +199,12 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _canCreateSession = MutableStateFlow(true)
     val canCreateSession: StateFlow<Boolean> = _canCreateSession.asStateFlow()
+
+    private val _expandedProjectIDs = MutableStateFlow<Set<String>>(emptySet())
+    val expandedProjectIDs: StateFlow<Set<String>> = _expandedProjectIDs.asStateFlow()
+
+    private val _expandedSessionIDs = MutableStateFlow<Set<String>>(emptySet())
+    val expandedSessionIDs: StateFlow<Set<String>> = _expandedSessionIDs.asStateFlow()
 
     val models: List<ModelPreset> = modelPresets
 
@@ -484,7 +494,17 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 val selected = state.value.selectedProjectWorktree
                 api.sessions(directory = selected, limit = 100)
             }.onSuccess { sessions ->
-                store.setSessions(sessions.sortedByDescending { it.time.updated })
+                val sorted = sessions.sortedByDescending { it.time.updated }
+                store.setSessions(sorted)
+                val sessionIDs = sorted.map { it.id }.toSet()
+                val projectKeys = sorted
+                    .map { normalizeProjectKey(it.projectID) }
+                    .toSet()
+                    .ifEmpty { setOf(UNASSIGNED_PROJECT_KEY) }
+                _expandedSessionIDs.update { it.intersect(sessionIDs) }
+                _expandedProjectIDs.update { existing ->
+                    if (existing.isEmpty()) projectKeys else existing.intersect(projectKeys).ifEmpty { projectKeys }
+                }
                 restoreSessionScopedSelections(state.value.currentSessionID)
                 recomputeCanCreateSession()
             }.onFailure {
@@ -675,6 +695,18 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun toggleProjectExpanded(projectKey: String) {
+        _expandedProjectIDs.update { old ->
+            if (projectKey in old) old - projectKey else old + projectKey
+        }
+    }
+
+    fun toggleSessionExpanded(sessionID: String) {
+        _expandedSessionIDs.update { old ->
+            if (sessionID in old) old - sessionID else old + sessionID
+        }
+    }
+
     fun clearError() {
         _lastError.value = null
     }
@@ -790,6 +822,10 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         val trimmed = raw.trim()
         if (trimmed.isEmpty()) return "http://127.0.0.1:4096"
         return if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) trimmed else "http://$trimmed"
+    }
+
+    private fun normalizeProjectKey(projectID: String): String {
+        return if (projectID.isBlank()) UNASSIGNED_PROJECT_KEY else projectID
     }
 
     private fun currentMessageLimit(sessionID: String): Int {
