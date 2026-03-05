@@ -161,6 +161,12 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private val _lastError = MutableStateFlow<String?>(null)
     val lastError: StateFlow<String?> = _lastError.asStateFlow()
 
+    private val _isApplyingSettings = MutableStateFlow(false)
+    val isApplyingSettings: StateFlow<Boolean> = _isApplyingSettings.asStateFlow()
+
+    private val _settingsFeedback = MutableStateFlow<String?>(null)
+    val settingsFeedback: StateFlow<String?> = _settingsFeedback.asStateFlow()
+
     private val _sshForm = MutableStateFlow(SshForm())
     val sshForm: StateFlow<SshForm> = _sshForm.asStateFlow()
 
@@ -347,6 +353,10 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun applySettingsAndReconnect() {
+        if (_isApplyingSettings.value) return
+        _isApplyingSettings.value = true
+        _settingsFeedback.value = "Applying settings..."
+        _lastError.value = null
         val normalizedBase = normalizeBaseUrl(_settingsForm.value.baseUrl)
         val username = _settingsForm.value.username
         val password = _settingsForm.value.password
@@ -379,6 +389,13 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             try {
                 val health = api.health()
                 store.setConnection(connected = health.healthy, version = health.version, error = null)
+                if (_isApplyingSettings.value) {
+                    _settingsFeedback.value = if (health.healthy) {
+                        "Apply succeeded: connected"
+                    } else {
+                        "Apply completed: server reported unhealthy"
+                    }
+                }
 
                 loadProvidersConfig()
                 runCatching { api.projects() }.onSuccess { store.setProjects(it) }
@@ -398,10 +415,17 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 startSse()
                 recomputeCanCreateSession()
             } catch (e: Exception) {
-                store.setConnection(connected = false, error = e.message)
-                _lastError.value = e.message
+                val reason = e.message?.takeIf { it.isNotBlank() } ?: "Connection failed"
+                store.setConnection(connected = false, error = reason)
+                _lastError.value = reason
+                if (_isApplyingSettings.value) {
+                    _settingsFeedback.value = "Apply failed: $reason"
+                }
             } finally {
                 _isRefreshing.value = false
+                if (_isApplyingSettings.value) {
+                    _isApplyingSettings.value = false
+                }
             }
         }
     }

@@ -871,6 +871,8 @@ private fun FilesScreen(vm: AppViewModel, state: AppState) {
 @Composable
 private fun SettingsScreen(vm: AppViewModel, state: AppState) {
     val settings by vm.settingsForm.collectAsState()
+    val isApplyingSettings by vm.isApplyingSettings.collectAsState()
+    val settingsFeedback by vm.settingsFeedback.collectAsState()
     val speech by vm.speechForm.collectAsState()
     val speechOk by vm.speechConnectionOk.collectAsState()
     val speechError by vm.speechConnectionError.collectAsState()
@@ -908,8 +910,26 @@ private fun SettingsScreen(vm: AppViewModel, state: AppState) {
             visualTransformation = PasswordVisualTransformation()
         )
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(onClick = { vm.applySettingsAndReconnect() }) { Text("Apply & Connect") }
+            Button(
+                onClick = { vm.applySettingsAndReconnect() },
+                enabled = !isApplyingSettings
+            ) {
+                if (isApplyingSettings) {
+                    CircularProgressIndicator(modifier = Modifier.width(14.dp), strokeWidth = 2.dp)
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Applying...")
+                } else {
+                    Text("Apply & Connect")
+                }
+            }
             OutlinedButton(onClick = { vm.refreshAll() }) { Text("Refresh") }
+        }
+        settingsFeedback?.let {
+            Text(
+                text = it,
+                style = MaterialTheme.typography.bodySmall,
+                color = if (it.startsWith("Apply failed")) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
 
         Text("Speech recognition", style = MaterialTheme.typography.titleMedium)
