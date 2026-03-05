@@ -368,6 +368,12 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         val normalizedBase = normalizeBaseUrl(_settingsForm.value.baseUrl)
         val username = _settingsForm.value.username.trim()
         val password = _settingsForm.value.password.trim()
+        if (password.isNotBlank() && username.isBlank()) {
+            _isApplyingSettings.value = false
+            _settingsFeedback.value = "[${nowLabel()}] Apply failed: Username is required when password is set."
+            _lastError.value = "Username is required when password is set."
+            return
+        }
         _settingsForm.update { it.copy(baseUrl = normalizedBase, username = username, password = password) }
         localStore.putString(Keys.serverBaseUrl, normalizedBase)
         localStore.putString(Keys.serverUsername, username)
@@ -427,7 +433,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 val reason = buildConnectionFailureReason(
                     throwable = e,
                     baseUrl = currentConfig.baseUrl,
-                    sshStatus = _sshStatus.value
+                    sshStatus = _sshStatus.value,
+                    username = _settingsForm.value.username.trim()
                 )
                 store.setConnection(connected = false, error = reason)
                 _lastError.value = reason
@@ -1130,7 +1137,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private fun buildConnectionFailureReason(
         throwable: Throwable,
         baseUrl: String,
-        sshStatus: String
+        sshStatus: String,
+        username: String
     ): String {
         val root = throwable.rootCause()
         val raw = root.message?.takeIf { it.isNotBlank() }
@@ -1148,7 +1156,10 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         return when {
-            lower.contains("http 401") -> "Unauthorized (401). Check Username/Password."
+            lower.contains("http 401") -> {
+                val userHint = username.ifBlank { "(empty)" }
+                "Unauthorized (401). Check Username/Password. URL=$baseUrl user=$userHint"
+            }
             lower.contains("http 403") -> "Forbidden (403). Check server auth policy."
             lower.contains("http 404") -> "Endpoint not found (404). Check Server URL."
             lower.contains("cleartext") -> "Cleartext HTTP blocked. Install latest APK and use http:// for tunnel URL."
@@ -1160,7 +1171,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 "Connection timeout. $tunnelHint"
             root is SSLException || lower.contains("ssl") || lower.contains("handshake") ->
                 "SSL/TLS failed. Use https:// only when server has valid TLS."
-            else -> "Connection failed: $raw"
+            else -> "Connection failed: $raw (URL=$baseUrl)"
         }
     }
 
