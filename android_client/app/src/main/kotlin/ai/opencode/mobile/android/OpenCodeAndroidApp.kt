@@ -222,18 +222,39 @@ private fun ChatScreen(vm: AppViewModel, state: AppState, onMicClick: () -> Unit
     val currentSession = remember(state.currentSessionID, state.sessions) {
         state.sessions.firstOrNull { it.id == state.currentSessionID }
     }
+    val sessionPermissions = state.pendingPermissions.filter { it.sessionID == state.currentSessionID }
+    val currentTodos = state.currentSessionID?.let { state.todosBySession[it] }.orEmpty()
+    var controlsExpanded by remember(state.currentSessionID) { mutableStateOf(false) }
 
     Column(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxSize()) {
         Card(modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("Current session", style = MaterialTheme.typography.titleSmall)
-                Text(
-                    currentSession?.title?.ifBlank { currentSession.id.take(8) } ?: "No session selected",
-                    style = MaterialTheme.typography.bodyMedium
-                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Current session", style = MaterialTheme.typography.titleSmall)
+                        Text(
+                            currentSession?.title?.ifBlank { currentSession.id.take(8) } ?: "No session selected",
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                    }
+                    OutlinedButton(onClick = { controlsExpanded = !controlsExpanded }) {
+                        Text(if (controlsExpanded) "Hide controls" else "Show controls")
+                    }
+                }
                 if (currentSession == null) {
                     Text(
                         "Go to Sessions tab to choose or create one.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                if (!controlsExpanded) {
+                    Text(
+                        "Controls are hidden to maximize message area.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -262,128 +283,139 @@ private fun ChatScreen(vm: AppViewModel, state: AppState, onMicClick: () -> Unit
             }
         }
 
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-            OutlinedButton(onClick = { vm.loadProvidersConfig() }, modifier = Modifier.weight(1f)) {
-                Text("Refresh context")
+        if (controlsExpanded) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                OutlinedButton(onClick = { vm.loadProvidersConfig() }, modifier = Modifier.weight(1f)) {
+                    Text("Refresh context")
+                }
+                OutlinedButton(
+                    onClick = { vm.abortCurrentSession() },
+                    enabled = state.currentSessionID != null,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text("Abort")
+                }
             }
-            OutlinedButton(
-                onClick = { vm.abortCurrentSession() },
-                enabled = state.currentSessionID != null,
-                modifier = Modifier.weight(1f)
-            ) {
-                Text("Abort")
-            }
-        }
 
-        Text("Model", style = MaterialTheme.typography.titleSmall)
-        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            items(models.size) { idx ->
-                val model = models[idx]
-                FilterChip(
-                    selected = idx == selectedModelIndex,
-                    onClick = { vm.setSelectedModel(idx) },
-                    label = { Text(model.displayName) }
-                )
+            Text("Model", style = MaterialTheme.typography.titleSmall)
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                items(models.size) { idx ->
+                    val model = models[idx]
+                    FilterChip(
+                        selected = idx == selectedModelIndex,
+                        onClick = { vm.setSelectedModel(idx) },
+                        label = { Text(model.displayName) }
+                    )
+                }
             }
-        }
 
-        Text("Agent", style = MaterialTheme.typography.titleSmall)
-        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            val agents = if (state.agents.isEmpty()) listOf("build") else state.agents.map { it.name }
-            items(agents) { name ->
-                FilterChip(
-                    selected = name == selectedAgentName,
-                    onClick = { vm.setSelectedAgent(name) },
-                    label = { Text(name) }
-                )
+            Text("Agent", style = MaterialTheme.typography.titleSmall)
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                val agents = if (state.agents.isEmpty()) listOf("build") else state.agents.map { it.name }
+                items(agents) { name ->
+                    FilterChip(
+                        selected = name == selectedAgentName,
+                        onClick = { vm.setSelectedAgent(name) },
+                        label = { Text(name) }
+                    )
+                }
             }
-        }
 
-        contextUsage?.let { usage ->
-            val color = when {
-                usage.usageRatio >= 0.9 -> Color(0xFFC62828)
-                usage.usageRatio >= 0.7 -> Color(0xFFEF6C00)
-                else -> Color(0xFF2E7D32)
-            }
-            Card(modifier = Modifier.fillMaxWidth()) {
-                Column(modifier = Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text("Context usage", style = MaterialTheme.typography.titleSmall)
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        CircularProgressIndicator(
-                            progress = { usage.usageRatio.toFloat() },
-                            modifier = Modifier.width(28.dp),
-                            strokeWidth = 4.dp,
-                            color = color,
-                            trackColor = MaterialTheme.colorScheme.surfaceVariant
-                        )
+            contextUsage?.let { usage ->
+                val color = when {
+                    usage.usageRatio >= 0.9 -> Color(0xFFC62828)
+                    usage.usageRatio >= 0.7 -> Color(0xFFEF6C00)
+                    else -> Color(0xFF2E7D32)
+                }
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    Column(modifier = Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text("Context usage", style = MaterialTheme.typography.titleSmall)
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            CircularProgressIndicator(
+                                progress = { usage.usageRatio.toFloat() },
+                                modifier = Modifier.width(28.dp),
+                                strokeWidth = 4.dp,
+                                color = color,
+                                trackColor = MaterialTheme.colorScheme.surfaceVariant
+                            )
+                            Text(
+                                "${usage.totalTokens}/${usage.contextLimit} (${(usage.usageRatio * 100).toInt()}%) • ${usage.providerID}/${usage.modelID}",
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                        }
                         Text(
-                            "${usage.totalTokens}/${usage.contextLimit} (${(usage.usageRatio * 100).toInt()}%) • ${usage.providerID}/${usage.modelID}",
+                            "input=${usage.inputTokens}, output=${usage.outputTokens}, reasoning=${usage.reasoningTokens}, cache(r/w)=${usage.cacheReadTokens}/${usage.cacheWriteTokens}",
                             style = MaterialTheme.typography.bodySmall
                         )
-                    }
-                    Text(
-                        "input=${usage.inputTokens}, output=${usage.outputTokens}, reasoning=${usage.reasoningTokens}, cache(r/w)=${usage.cacheReadTokens}/${usage.cacheWriteTokens}",
-                        style = MaterialTheme.typography.bodySmall
-                    )
-                    usage.totalSessionCost?.let { c ->
-                        Text("total cost: ${"%.4f".format(c)}", style = MaterialTheme.typography.bodySmall)
+                        usage.totalSessionCost?.let { c ->
+                            Text("total cost: ${"%.4f".format(c)}", style = MaterialTheme.typography.bodySmall)
+                        }
                     }
                 }
             }
+
+            if (sessionPermissions.isNotEmpty()) {
+                Text("Permissions", style = MaterialTheme.typography.titleSmall)
+                sessionPermissions.forEach { perm ->
+                    Card(modifier = Modifier.fillMaxWidth()) {
+                        Column(modifier = Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text("Permission: ${perm.permission ?: perm.id}")
+                            if (perm.patterns.isNotEmpty()) {
+                                Text("Patterns: ${perm.patterns.joinToString()}", style = MaterialTheme.typography.bodySmall)
+                            }
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Button(onClick = { vm.respondPermission(perm.sessionID, perm.id, allowAlways = false) }) {
+                                    Text("Allow once")
+                                }
+                                OutlinedButton(onClick = { vm.respondPermission(perm.sessionID, perm.id, allowAlways = true) }) {
+                                    Text("Allow always")
+                                }
+                                OutlinedButton(onClick = { vm.rejectPermission(perm.sessionID, perm.id) }) {
+                                    Text("Reject")
+                                }
+                            }
+                        }
+                    }
+                }
+                HorizontalDivider()
+            }
+
+            if (currentTodos.isNotEmpty()) {
+                Text("Todo", style = MaterialTheme.typography.titleSmall)
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    Column(modifier = Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        currentTodos.forEach { todo ->
+                            val mark = when {
+                                todo.completed == true -> "[x]"
+                                todo.status.equals("done", ignoreCase = true) -> "[x]"
+                                else -> "[ ]"
+                            }
+                            Text("$mark ${todo.content ?: "(empty)"}", style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
+                }
+                HorizontalDivider()
+            }
+        } else {
+            if (sessionPermissions.isNotEmpty() || currentTodos.isNotEmpty()) {
+                Text(
+                    "There are pending permissions/todos. Tap 'Show controls' to manage.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
         }
+
         providerError?.takeIf { it.isNotBlank() }?.let {
             Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
         }
 
         HorizontalDivider()
 
-        val sessionPermissions = state.pendingPermissions.filter { it.sessionID == state.currentSessionID }
-        if (sessionPermissions.isNotEmpty()) {
-            Text("Permissions", style = MaterialTheme.typography.titleSmall)
-            sessionPermissions.forEach { perm ->
-                Card(modifier = Modifier.fillMaxWidth()) {
-                    Column(modifier = Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Text("Permission: ${perm.permission ?: perm.id}")
-                        if (perm.patterns.isNotEmpty()) {
-                            Text("Patterns: ${perm.patterns.joinToString()}", style = MaterialTheme.typography.bodySmall)
-                        }
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Button(onClick = { vm.respondPermission(perm.sessionID, perm.id, allowAlways = false) }) {
-                                Text("Allow once")
-                            }
-                            OutlinedButton(onClick = { vm.respondPermission(perm.sessionID, perm.id, allowAlways = true) }) {
-                                Text("Allow always")
-                            }
-                            OutlinedButton(onClick = { vm.rejectPermission(perm.sessionID, perm.id) }) {
-                                Text("Reject")
-                            }
-                        }
-                    }
-                }
-            }
-            HorizontalDivider()
-        }
-
-        val currentTodos = state.currentSessionID?.let { state.todosBySession[it] }.orEmpty()
-        if (currentTodos.isNotEmpty()) {
-            Text("Todo", style = MaterialTheme.typography.titleSmall)
-            Card(modifier = Modifier.fillMaxWidth()) {
-                Column(modifier = Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    currentTodos.forEach { todo ->
-                        val mark = when {
-                            todo.completed == true -> "[x]"
-                            todo.status.equals("done", ignoreCase = true) -> "[x]"
-                            else -> "[ ]"
-                        }
-                        Text("$mark ${todo.content ?: "(empty)"}", style = MaterialTheme.typography.bodySmall)
-                    }
-                }
-            }
-            HorizontalDivider()
-        }
-
         LazyColumn(
-            modifier = Modifier.weight(1f),
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth(),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             if (hasMoreHistory || isLoadingOlderMessages) {

@@ -21,7 +21,7 @@ object WireParsers {
 
     fun parseProviders(raw: String): ProvidersResponse {
         val root = json.parseToJsonElement(raw).jsonObject
-        val default = root["default"]?.let { json.decodeFromJsonElement<DefaultProvider>(it) }
+        val default = root["default"]?.let { parseDefaultProvider(it) }
         val providersRaw = root["providers"]
 
         val providers = when (providersRaw) {
@@ -37,6 +37,25 @@ object WireParsers {
             providers = providers.sortedBy { it.id },
             default = default
         )
+    }
+
+    private fun parseDefaultProvider(element: JsonElement): DefaultProvider? {
+        runCatching { json.decodeFromJsonElement<DefaultProvider>(element) }
+            .getOrNull()
+            ?.let { decoded ->
+                if (!decoded.providerID.isNullOrBlank() || !decoded.modelID.isNullOrBlank()) {
+                    return decoded
+                }
+            }
+
+        val obj = element as? JsonObject ?: return null
+        val providerID = obj["providerID"]?.jsonPrimitive?.contentOrNull
+            ?: obj["providerId"]?.jsonPrimitive?.contentOrNull
+        val modelID = obj["modelID"]?.jsonPrimitive?.contentOrNull
+            ?: obj["modelId"]?.jsonPrimitive?.contentOrNull
+
+        if (providerID.isNullOrBlank() && modelID.isNullOrBlank()) return null
+        return DefaultProvider(providerID = providerID, modelID = modelID)
     }
 
     fun parseMessages(raw: String): List<MessageWithParts> {
@@ -128,4 +147,3 @@ object WireParsers {
         return json.encodeToString(JsonObject.serializer(), root)
     }
 }
-

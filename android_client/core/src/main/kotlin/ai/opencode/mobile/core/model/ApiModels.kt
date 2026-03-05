@@ -207,8 +207,8 @@ data class ConfigProvider(
 
 @Serializable
 data class DefaultProvider(
-    @SerialName("providerID") val providerID: String,
-    @SerialName("modelID") val modelID: String
+    @SerialName("providerID") val providerID: String? = null,
+    @SerialName("modelID") val modelID: String? = null
 )
 
 data class ProvidersResponse(
