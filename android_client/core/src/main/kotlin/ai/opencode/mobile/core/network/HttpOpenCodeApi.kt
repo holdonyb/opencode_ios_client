@@ -17,7 +17,9 @@ import ai.opencode.mobile.core.model.TodoItem
 import ai.opencode.mobile.core.model.WireParsers
 import java.io.IOException
 import java.util.Base64
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.JsonObject
@@ -200,22 +202,26 @@ class HttpOpenCodeApi(
             requestBuilder.method(method, requestBody)
         }
 
-        val response = client.newCall(requestBuilder.build()).execute()
+        val response = withContext(Dispatchers.IO) {
+            client.newCall(requestBuilder.build()).execute()
+        }
         if (!response.isSuccessful) {
-            val payload = response.body?.string().orEmpty()
+            val payload = withContext(Dispatchers.IO) { response.body?.string().orEmpty() }
             response.close()
             throw IOException("HTTP ${response.code}: $payload")
         }
         return response
     }
 
-    private inline fun <reified T> decodeBody(response: Response): T {
+    private suspend inline fun <reified T> decodeBody(response: Response): T {
         val raw = bodyString(response)
         return WireParsers.json.decodeFromString(raw)
     }
 
-    private fun bodyString(response: Response): String {
-        return response.body?.string() ?: throw IOException("Empty response body")
+    private suspend fun bodyString(response: Response): String {
+        return withContext(Dispatchers.IO) {
+            response.body?.string() ?: throw IOException("Empty response body")
+        }
     }
 
     private fun basicAuthHeader(username: String?, password: String?): String? {

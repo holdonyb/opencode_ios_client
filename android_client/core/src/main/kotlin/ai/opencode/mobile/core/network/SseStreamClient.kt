@@ -8,7 +8,9 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.Dispatchers
 import okhttp3.OkHttpClient
 import okhttp3.Request
 
@@ -66,7 +68,7 @@ class SseStreamClient(
                 delay(backoffMillis(retries))
             }
         }
-    }
+    }.flowOn(Dispatchers.IO)
 
     private fun backoffMillis(retries: Int): Long {
         val capped = min(retries, 5)
