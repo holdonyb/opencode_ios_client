@@ -27,12 +27,19 @@ import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.AccountTree
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.FolderOpen
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.Link
+import androidx.compose.material.icons.filled.LinkOff
 import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.VpnKey
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -887,6 +894,15 @@ private fun SettingsScreen(vm: AppViewModel, state: AppState) {
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
     ) {
+        Text(
+            "Logo & Build: OpenCode Android",
+            style = MaterialTheme.typography.titleSmall
+        )
+        Text(
+            "Version ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE}) · ${BuildConfig.BUILD_TAG}",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
         OutlinedTextField(
             value = settings.baseUrl,
             onValueChange = vm::setSettingsBaseUrl,
@@ -914,6 +930,8 @@ private fun SettingsScreen(vm: AppViewModel, state: AppState) {
                 onClick = { vm.applySettingsAndReconnect() },
                 enabled = !isApplyingSettings
             ) {
+                Icon(Icons.Default.Link, contentDescription = null)
+                Spacer(modifier = Modifier.width(6.dp))
                 if (isApplyingSettings) {
                     CircularProgressIndicator(modifier = Modifier.width(14.dp), strokeWidth = 2.dp)
                     Spacer(modifier = Modifier.width(6.dp))
@@ -922,14 +940,36 @@ private fun SettingsScreen(vm: AppViewModel, state: AppState) {
                     Text("Apply & Connect")
                 }
             }
-            OutlinedButton(onClick = { vm.refreshAll() }) { Text("Refresh") }
+            OutlinedButton(onClick = { vm.refreshAll() }) {
+                Icon(Icons.Default.Refresh, contentDescription = null)
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("Refresh")
+            }
         }
-        settingsFeedback?.let {
-            Text(
-                text = it,
-                style = MaterialTheme.typography.bodySmall,
-                color = if (it.startsWith("Apply failed")) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant
-            )
+        settingsFeedback?.let { feedback ->
+            val isApplying = feedback.contains("Applying", ignoreCase = true)
+            val isError = feedback.contains("failed", ignoreCase = true)
+            val icon = when {
+                isApplying -> Icons.Default.Info
+                isError -> Icons.Default.ErrorOutline
+                else -> Icons.Default.CheckCircle
+            }
+            val color = when {
+                isApplying -> MaterialTheme.colorScheme.onSurfaceVariant
+                isError -> MaterialTheme.colorScheme.error
+                else -> Color(0xFF2E7D32)
+            }
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Icon(icon, contentDescription = null, tint = color)
+                Text(
+                    text = feedback,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = color
+                )
+            }
         }
 
         Text("Speech recognition", style = MaterialTheme.typography.titleMedium)
@@ -1091,6 +1131,8 @@ private fun SettingsScreen(vm: AppViewModel, state: AppState) {
                 onClick = { vm.connectSshTunnel() },
                 enabled = !isSshConnecting
             ) {
+                Icon(Icons.Default.VpnKey, contentDescription = null)
+                Spacer(modifier = Modifier.width(6.dp))
                 if (isSshConnecting) {
                     CircularProgressIndicator(modifier = Modifier.width(14.dp), strokeWidth = 2.dp)
                     Spacer(modifier = Modifier.width(6.dp))
@@ -1102,7 +1144,11 @@ private fun SettingsScreen(vm: AppViewModel, state: AppState) {
             OutlinedButton(
                 onClick = { vm.disconnectSshTunnel() },
                 enabled = !isSshConnecting
-            ) { Text("Disconnect SSH") }
+            ) {
+                Icon(Icons.Default.LinkOff, contentDescription = null)
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("Disconnect SSH")
+            }
         }
         if (!sshError.isNullOrBlank()) {
             Text(

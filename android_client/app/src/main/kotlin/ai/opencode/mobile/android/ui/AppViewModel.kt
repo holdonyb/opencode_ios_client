@@ -19,6 +19,9 @@ import ai.opencode.mobile.core.state.AppState
 import ai.opencode.mobile.core.state.AppStateStore
 import ai.opencode.mobile.core.state.SseSideEffect
 import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import kotlin.math.max
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -53,7 +56,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         val useKeyAuth: Boolean = false,
         val privateKeyPem: String = "",
         val privateKeyPassphrase: String = "",
-        val remotePort: String = "18080",
+        val remotePort: String = "4096",
         val localPort: String = "14096"
     )
 
@@ -134,6 +137,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private val providerContextLimitByKey = mutableMapOf<String, Int>()
 
     private val defaultMessageLimit = 6
+    private val feedbackTimeFormat = SimpleDateFormat("HH:mm:ss", Locale.US)
 
     val state: StateFlow<AppState> = store.state
 
@@ -355,7 +359,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     fun applySettingsAndReconnect() {
         if (_isApplyingSettings.value) return
         _isApplyingSettings.value = true
-        _settingsFeedback.value = "Applying settings..."
+        _settingsFeedback.value = "[${nowLabel()}] Applying settings..."
         _lastError.value = null
         val normalizedBase = normalizeBaseUrl(_settingsForm.value.baseUrl)
         val username = _settingsForm.value.username
@@ -391,9 +395,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 store.setConnection(connected = health.healthy, version = health.version, error = null)
                 if (_isApplyingSettings.value) {
                     _settingsFeedback.value = if (health.healthy) {
-                        "Apply succeeded: connected"
+                        "[${nowLabel()}] Apply succeeded: connected"
                     } else {
-                        "Apply completed: server reported unhealthy"
+                        "[${nowLabel()}] Apply completed: server reported unhealthy"
                     }
                 }
 
@@ -419,7 +423,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 store.setConnection(connected = false, error = reason)
                 _lastError.value = reason
                 if (_isApplyingSettings.value) {
-                    _settingsFeedback.value = "Apply failed: $reason"
+                    _settingsFeedback.value = "[${nowLabel()}] Apply failed: $reason"
                 }
             } finally {
                 _isRefreshing.value = false
@@ -1077,7 +1081,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             useKeyAuth = localStore.getString(Keys.sshUseKeyAuth).toBooleanStrictOrNull() ?: false,
             privateKeyPem = secretStore.get(Keys.secretSshPrivateKey),
             privateKeyPassphrase = secretStore.get(Keys.secretSshPassphrase),
-            remotePort = localStore.getString(Keys.sshRemotePort, "18080"),
+            remotePort = localStore.getString(Keys.sshRemotePort, "4096"),
             localPort = localStore.getString(Keys.sshLocalPort, "14096")
         )
 
@@ -1108,5 +1112,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             audioRecorder.stop()
             sshManager.disconnect()
         }
+    }
+
+    private fun nowLabel(): String = synchronized(feedbackTimeFormat) {
+        feedbackTimeFormat.format(Date())
     }
 }
