@@ -40,6 +40,7 @@ class AIBuildersAudioClient(
     ): TranscriptionResponse = withContext(Dispatchers.IO) {
         val normalized = normalizeBaseUrl(baseUrl)
         require(token.isNotBlank()) { "${provider.displayName} token is empty" }
+        val candidateUrls = buildTranscribeUrls(normalized, provider, doubaoResourceID)
 
         val body = MultipartBody.Builder()
             .setType(MultipartBody.FORM)
@@ -58,35 +59,45 @@ class AIBuildersAudioClient(
             }
             .build()
 
-        val requestBuilder = Request.Builder()
-            .url(buildTranscribeUrl(normalized, provider, doubaoResourceID))
-            .post(body)
-        when (provider) {
-            SpeechProvider.AIBUILDERS -> {
-                requestBuilder.header("Authorization", "Bearer $token")
-            }
-            SpeechProvider.DOUBAO -> {
-                requestBuilder.header("X-Api-Key", token)
-                if (!doubaoResourceID.isNullOrBlank()) {
-                    requestBuilder.header("X-Resource-Id", doubaoResourceID)
+        var lastError: IOException? = null
+        for ((index, url) in candidateUrls.withIndex()) {
+            val requestBuilder = Request.Builder()
+                .url(url)
+                .post(body)
+            when (provider) {
+                SpeechProvider.AIBUILDERS -> {
+                    requestBuilder.header("Authorization", "Bearer $token")
+                }
+                SpeechProvider.DOUBAO -> {
+                    requestBuilder.header("X-Api-Key", token)
+                    if (!doubaoResourceID.isNullOrBlank()) {
+                        requestBuilder.header("X-Resource-Id", doubaoResourceID)
+                    }
                 }
             }
-        }
-        val request = requestBuilder.build()
+            val request = requestBuilder.build()
 
-        val response = http.newCall(request).execute()
-        response.use {
-            if (!it.isSuccessful) {
-                val payload = it.body?.string().orEmpty()
-                throw IOException("${provider.displayName} transcription HTTP ${it.code}: $payload")
+            val response = http.newCall(request).execute()
+            response.use {
+                if (!it.isSuccessful) {
+                    val payload = it.body?.string().orEmpty()
+                    val fallbackAllowed = provider == SpeechProvider.DOUBAO && it.code == 404 && index < candidateUrls.lastIndex
+                    if (fallbackAllowed) {
+                        lastError = IOException("${provider.displayName} transcription HTTP ${it.code}: $payload")
+                        return@use
+                    }
+                    throw IOException("${provider.displayName} transcription HTTP ${it.code}: $payload")
+                }
+                val raw = it.body?.string().orEmpty()
+                val parsed = json.parseToJsonElement(raw).jsonObject
+                val text = extractText(parsed)
+                    ?: throw IOException("${provider.displayName} transcription response missing text")
+                val requestID = parsed["request_id"]?.jsonPrimitive?.content
+                return@withContext TranscriptionResponse(requestID = requestID, text = text)
             }
-            val raw = it.body?.string().orEmpty()
-            val parsed = json.parseToJsonElement(raw).jsonObject
-            val text = extractText(parsed)
-                ?: throw IOException("${provider.displayName} transcription response missing text")
-            val requestID = parsed["request_id"]?.jsonPrimitive?.content
-            TranscriptionResponse(requestID = requestID, text = text)
         }
+
+        throw lastError ?: IOException("${provider.displayName} transcription failed")
     }
 
     suspend fun testConnection(
@@ -97,53 +108,81 @@ class AIBuildersAudioClient(
     ) = withContext(Dispatchers.IO) {
         val normalized = normalizeBaseUrl(baseUrl)
         require(token.isNotBlank()) { "${provider.displayName} token is empty" }
+        val candidateUrls = buildTranscribeUrls(normalized, provider, doubaoResourceID)
 
-        val request = when (provider) {
-            SpeechProvider.AIBUILDERS -> {
-                Request.Builder()
-                    .url("$normalized/v1/embeddings")
-                    .header("Authorization", "Bearer $token")
-                    .post("""{"input":"ok"}""".toRequestBody("application/json".toMediaType()))
-                    .build()
+        if (provider == SpeechProvider.AIBUILDERS) {
+            val request = Request.Builder()
+                .url("$normalized/v1/embeddings")
+                .header("Authorization", "Bearer $token")
+                .post("""{"input":"ok"}""".toRequestBody("application/json".toMediaType()))
+                .build()
+            val response = http.newCall(request).execute()
+            response.use {
+                if (!it.isSuccessful) {
+                    val payload = it.body?.string().orEmpty()
+                    throw IOException("${provider.displayName} connection test HTTP ${it.code}: $payload")
+                }
             }
-            SpeechProvider.DOUBAO -> {
-                val body = MultipartBody.Builder()
-                    .setType(MultipartBody.FORM)
-                    .apply {
-                        if (!doubaoResourceID.isNullOrBlank()) {
-                            addFormDataPart("resource_id", doubaoResourceID)
-                        }
-                    }
-                    .build()
-                Request.Builder()
-                    .url(buildTranscribeUrl(normalized, provider, doubaoResourceID))
-                    .header("X-Api-Key", token)
-                    .apply {
-                        if (!doubaoResourceID.isNullOrBlank()) {
-                            header("X-Resource-Id", doubaoResourceID)
-                        }
-                    }
-                    .post(body)
-                    .build()
-            }
+            return@withContext
         }
 
-        val response = http.newCall(request).execute()
-        response.use {
-            if (provider == SpeechProvider.DOUBAO) {
+        var lastError: IOException? = null
+        for ((index, url) in candidateUrls.withIndex()) {
+            val body = MultipartBody.Builder()
+                .setType(MultipartBody.FORM)
+                .apply {
+                    if (!doubaoResourceID.isNullOrBlank()) {
+                        addFormDataPart("resource_id", doubaoResourceID)
+                    }
+                }
+                .build()
+            val request = Request.Builder()
+                .url(url)
+                .header("X-Api-Key", token)
+                .apply {
+                    if (!doubaoResourceID.isNullOrBlank()) {
+                        header("X-Resource-Id", doubaoResourceID)
+                    }
+                }
+                .post(body)
+                .build()
+
+            val response = http.newCall(request).execute()
+            response.use {
                 if (it.code == 401 || it.code == 403) {
                     val payload = it.body?.string().orEmpty()
                     throw IOException("Doubao connection test unauthorized HTTP ${it.code}: $payload")
                 }
+                val fallbackAllowed = it.code == 404 && index < candidateUrls.lastIndex
+                if (fallbackAllowed) {
+                    val payload = it.body?.string().orEmpty()
+                    lastError = IOException("Doubao connection test HTTP ${it.code}: $payload")
+                    return@use
+                }
                 if (it.code in 200..499) {
                     return@withContext
                 }
-            }
-            if (!it.isSuccessful) {
                 val payload = it.body?.string().orEmpty()
                 throw IOException("${provider.displayName} connection test HTTP ${it.code}: $payload")
             }
         }
+        throw lastError ?: IOException("${provider.displayName} connection test failed")
+    }
+
+    private fun buildTranscribeUrls(
+        normalizedBaseUrl: String,
+        provider: SpeechProvider,
+        doubaoResourceID: String?
+    ): List<String> {
+        val urls = linkedSetOf(buildTranscribeUrl(normalizedBaseUrl, provider, doubaoResourceID))
+        if (provider == SpeechProvider.DOUBAO) {
+            val trimmed = normalizedBaseUrl.trimEnd('/')
+            if (trimmed.endsWith("/backend")) {
+                val fallbackBase = trimmed.removeSuffix("/backend")
+                urls += buildTranscribeUrl(fallbackBase, provider, doubaoResourceID)
+            }
+        }
+        return urls.toList()
     }
 
     private fun buildTranscribeUrl(
@@ -158,7 +197,7 @@ class AIBuildersAudioClient(
         }
         return builder.build().toString()
     }
-
+ 
     private fun extractText(payload: JsonObject): String? {
         payload["text"]?.jsonPrimitive?.contentOrNull?.let { return it }
         payload["result"]?.jsonPrimitive?.contentOrNull?.let { return it }

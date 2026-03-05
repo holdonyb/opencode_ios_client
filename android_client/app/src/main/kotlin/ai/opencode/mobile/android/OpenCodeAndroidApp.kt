@@ -78,6 +78,9 @@ import ai.opencode.mobile.core.model.Part
 import ai.opencode.mobile.core.model.Project
 import ai.opencode.mobile.core.model.Session
 import ai.opencode.mobile.core.model.SessionStatus
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonPrimitive
 import ai.opencode.mobile.core.state.AppState
 
 private data class ProjectSessionGroupUi(
@@ -448,7 +451,16 @@ private fun ChatScreen(vm: AppViewModel, state: AppState, onMicClick: () -> Unit
                             PartText(part = part, streamingTexts = state.streamingPartTexts)
                         }
                         if (msg.parts.isEmpty()) {
-                            Text("(no parts)")
+                            val assistantError = extractAssistantErrorText(msg.info.error)
+                            if (!assistantError.isNullOrBlank()) {
+                                Text(
+                                    "Assistant error: $assistantError",
+                                    color = MaterialTheme.colorScheme.error,
+                                    style = MaterialTheme.typography.bodySmall
+                                )
+                            } else {
+                                Text("(no parts)")
+                            }
                         }
                     }
                 }
@@ -1274,4 +1286,17 @@ private fun buildSessionForest(sessions: List<Session>): List<SessionNodeUi> {
     }
 
     return build(null)
+}
+
+private fun extractAssistantErrorText(error: JsonObject?): String? {
+    if (error == null) return null
+    val direct = error["message"]?.jsonPrimitive?.contentOrNull
+    if (!direct.isNullOrBlank()) return direct
+
+    val data = error["data"] as? JsonObject
+    val nested = data?.get("message")?.jsonPrimitive?.contentOrNull
+    if (!nested.isNullOrBlank()) return nested
+
+    val name = error["name"]?.jsonPrimitive?.contentOrNull
+    return name?.takeIf { it.isNotBlank() }
 }

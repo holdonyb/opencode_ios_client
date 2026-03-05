@@ -68,6 +68,7 @@ data class Message(
     val providerID: String? = null,
     val modelID: String? = null,
     val model: ModelInfo? = null,
+    val error: JsonObject? = null,
     val tokens: TokenInfo? = null,
     val cost: Double? = null,
     val time: TimeInfo
