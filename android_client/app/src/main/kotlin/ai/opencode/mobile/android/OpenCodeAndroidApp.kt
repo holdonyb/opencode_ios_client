@@ -1002,6 +1002,13 @@ private fun SettingsScreen(vm: AppViewModel, state: AppState) {
             Text("Use SSH key auth")
             Switch(checked = ssh.useKeyAuth, onCheckedChange = vm::setSshUseKeyAuth)
         }
+        if (!ssh.useKeyAuth) {
+            Text(
+                "Enable key auth to show 'Private Key (PEM)'. Paste full key text (BEGIN/END).",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
         if (ssh.useKeyAuth) {
             OutlinedTextField(
                 value = ssh.privateKeyPem,

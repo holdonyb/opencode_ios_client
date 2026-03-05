@@ -53,8 +53,8 @@ E:\Android\Sdk\platform-tools\adb.exe -s emulator-5554 install -r .\app\build\ou
 
 ### SSH Tunnel
 - 填写 `SSH Host/Port/User` 和密码或私钥
-- `Connect SSH` 建立隧道后，URL 会自动改到 `http://127.0.0.1:<localPort>`
-- 建立隧道后，仍需点一次 `Apply & Connect` 才会切换 App 的实际连接配置
+- `Connect SSH` 建立隧道后，会自动把 URL 切到 `http://127.0.0.1:<localPort>` 并自动重连
+- 若你手动改过 `Server URL`、账号密码，建议再点一次 `Apply & Connect` 固化配置
 
 ## 5. URL 该怎么填（最常用）
 
@@ -70,7 +70,7 @@ E:\Android\Sdk\platform-tools\adb.exe -s emulator-5554 install -r .\app\build\ou
 ### 场景 C：走 SSH 隧道
 - 在 `SSH Tunnel` 配好后点 `Connect SSH`
 - 自动得到 `http://127.0.0.1:<localPort>`
-- 再点 `Apply & Connect`
+- 通常会自动重连；若你刚修改过账号密码，再点一次 `Apply & Connect`
 
 ## 6. Sessions 页面怎么用
 

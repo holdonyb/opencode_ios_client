@@ -266,8 +266,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun setSshPrivateKeyPem(value: String) {
-        _sshForm.update { it.copy(privateKeyPem = value) }
-        secretStore.put(Keys.secretSshPrivateKey, value)
+        val normalized = value.replace("\r\n", "\n")
+        _sshForm.update { it.copy(privateKeyPem = normalized) }
+        secretStore.put(Keys.secretSshPrivateKey, normalized)
     }
 
     fun setSshPrivateKeyPassphrase(value: String) {
@@ -371,15 +372,33 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     fun connectSshTunnel() {
         val form = _sshForm.value
+        val sshPort = form.port.toIntOrNull()
+        val remotePort = form.remotePort.toIntOrNull()
+        val localPort = form.localPort.toIntOrNull()
+        val normalizedPrivateKey = form.privateKeyPem.replace("\r\n", "\n").trim()
+
+        if (sshPort == null || sshPort !in 1..65535) {
+            _lastError.value = "SSH port must be between 1 and 65535"
+            return
+        }
+        if (remotePort == null || remotePort !in 1..65535) {
+            _lastError.value = "Remote port must be between 1 and 65535"
+            return
+        }
+        if (localPort == null || localPort !in 1..65535) {
+            _lastError.value = "Local port must be between 1 and 65535"
+            return
+        }
+
         val config = SshTunnelConfig(
             host = form.host.trim(),
-            port = form.port.toIntOrNull() ?: 22,
+            port = sshPort,
             username = form.username.trim(),
             password = form.password,
-            privateKeyPem = form.privateKeyPem.takeIf { form.useKeyAuth && it.isNotBlank() },
+            privateKeyPem = normalizedPrivateKey.takeIf { form.useKeyAuth && it.isNotBlank() },
             privateKeyPassphrase = form.privateKeyPassphrase.takeIf { form.useKeyAuth && it.isNotBlank() },
-            remotePort = form.remotePort.toIntOrNull() ?: 18080,
-            localPort = form.localPort.toIntOrNull() ?: 14096
+            remotePort = remotePort,
+            localPort = localPort
         )
         if (config.host.isBlank() || config.username.isBlank()) {
             _lastError.value = "SSH host and username are required"
@@ -395,15 +414,27 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         viewModelScope.launch {
+            _lastError.value = null
             _sshStatus.value = "Connecting..."
             sshManager.connect(config)
                 .onSuccess { local ->
+                    val tunnelBaseUrl = "http://127.0.0.1:$local"
                     _sshStatus.value = "Connected (127.0.0.1:$local)"
-                    _settingsForm.update { it.copy(baseUrl = "http://127.0.0.1:$local") }
+                    _settingsForm.update { it.copy(baseUrl = tunnelBaseUrl) }
+                    localStore.putString(Keys.serverBaseUrl, tunnelBaseUrl)
+                    val username = _settingsForm.value.username.ifBlank { null }
+                    val password = _settingsForm.value.password.ifBlank { null }
+                    reconfigureApi(
+                        baseUrl = tunnelBaseUrl,
+                        username = username,
+                        password = password
+                    )
+                    refreshAll()
                 }
-                .onFailure {
+                .onFailure { e ->
+                    val reason = e.message?.takeIf { it.isNotBlank() } ?: e::class.java.simpleName
                     _sshStatus.value = "Error"
-                    _lastError.value = it.message
+                    _lastError.value = "SSH connect failed: $reason"
                 }
         }
     }
