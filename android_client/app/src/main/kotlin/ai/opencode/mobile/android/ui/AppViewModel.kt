@@ -26,6 +26,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeout
 
 class AppViewModel(application: Application) : AndroidViewModel(application) {
     companion object {
@@ -165,6 +166,12 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _sshStatus = MutableStateFlow("Disconnected")
     val sshStatus: StateFlow<String> = _sshStatus.asStateFlow()
+
+    private val _isSshConnecting = MutableStateFlow(false)
+    val isSshConnecting: StateFlow<Boolean> = _isSshConnecting.asStateFlow()
+
+    private val _sshError = MutableStateFlow<String?>(null)
+    val sshError: StateFlow<String?> = _sshError.asStateFlow()
 
     private val _isRecording = MutableStateFlow(false)
     val isRecording: StateFlow<Boolean> = _isRecording.asStateFlow()
@@ -400,6 +407,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun connectSshTunnel() {
+        if (_isSshConnecting.value) return
         val form = _sshForm.value
         val sshPort = form.port.toIntOrNull()
         val remotePort = form.remotePort.toIntOrNull()
@@ -407,15 +415,24 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         val normalizedPrivateKey = form.privateKeyPem.replace("\r\n", "\n").trim()
 
         if (sshPort == null || sshPort !in 1..65535) {
-            _lastError.value = "SSH port must be between 1 and 65535"
+            val msg = "SSH port must be between 1 and 65535"
+            _sshStatus.value = "Error"
+            _sshError.value = msg
+            _lastError.value = msg
             return
         }
         if (remotePort == null || remotePort !in 1..65535) {
-            _lastError.value = "Remote port must be between 1 and 65535"
+            val msg = "Remote port must be between 1 and 65535"
+            _sshStatus.value = "Error"
+            _sshError.value = msg
+            _lastError.value = msg
             return
         }
         if (localPort == null || localPort !in 1..65535) {
-            _lastError.value = "Local port must be between 1 and 65535"
+            val msg = "Local port must be between 1 and 65535"
+            _sshStatus.value = "Error"
+            _sshError.value = msg
+            _lastError.value = msg
             return
         }
 
@@ -430,25 +447,50 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             localPort = localPort
         )
         if (config.host.isBlank() || config.username.isBlank()) {
-            _lastError.value = "SSH host and username are required"
+            val msg = "SSH host and username are required"
+            _sshStatus.value = "Error"
+            _sshError.value = msg
+            _lastError.value = msg
             return
         }
         if (!form.useKeyAuth && config.password.isBlank()) {
-            _lastError.value = "SSH password is required for password auth"
+            val msg = "SSH password is required for password auth"
+            _sshStatus.value = "Error"
+            _sshError.value = msg
+            _lastError.value = msg
             return
         }
         if (form.useKeyAuth && config.privateKeyPem.isNullOrBlank()) {
-            _lastError.value = "SSH private key is required for key auth"
+            val msg = "SSH private key is required for key auth"
+            _sshStatus.value = "Error"
+            _sshError.value = msg
+            _lastError.value = msg
+            return
+        }
+        if (form.useKeyAuth &&
+            (!normalizedPrivateKey.contains("BEGIN") || !normalizedPrivateKey.contains("END"))
+        ) {
+            val msg = "Invalid PEM format: include full BEGIN/END key block"
+            _sshStatus.value = "Error"
+            _sshError.value = msg
+            _lastError.value = msg
             return
         }
 
         viewModelScope.launch {
+            _isSshConnecting.value = true
             _lastError.value = null
+            _sshError.value = null
             _sshStatus.value = "Connecting..."
-            sshManager.connect(config)
+            runCatching {
+                withTimeout(40_000) {
+                    sshManager.connect(config).getOrThrow()
+                }
+            }
                 .onSuccess { local ->
                     val tunnelBaseUrl = "http://127.0.0.1:$local"
                     _sshStatus.value = "Connected (127.0.0.1:$local)"
+                    _sshError.value = null
                     _settingsForm.update { it.copy(baseUrl = tunnelBaseUrl) }
                     localStore.putString(Keys.serverBaseUrl, tunnelBaseUrl)
                     val username = _settingsForm.value.username.ifBlank { null }
@@ -463,8 +505,10 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 .onFailure { e ->
                     val reason = e.message?.takeIf { it.isNotBlank() } ?: e::class.java.simpleName
                     _sshStatus.value = "Error"
+                    _sshError.value = reason
                     _lastError.value = "SSH connect failed: $reason"
                 }
+            _isSshConnecting.value = false
         }
     }
 
@@ -472,6 +516,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             sshManager.disconnect()
             _sshStatus.value = "Disconnected"
+            _isSshConnecting.value = false
+            _sshError.value = null
         }
     }
 

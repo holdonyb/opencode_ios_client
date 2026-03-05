@@ -876,6 +876,8 @@ private fun SettingsScreen(vm: AppViewModel, state: AppState) {
     val speechError by vm.speechConnectionError.collectAsState()
     val ssh by vm.sshForm.collectAsState()
     val sshStatus by vm.sshStatus.collectAsState()
+    val sshError by vm.sshError.collectAsState()
+    val isSshConnecting by vm.isSshConnecting.collectAsState()
     val canCreateSession by vm.canCreateSession.collectAsState()
     Column(
         verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -1065,8 +1067,29 @@ private fun SettingsScreen(vm: AppViewModel, state: AppState) {
             )
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(onClick = { vm.connectSshTunnel() }) { Text("Connect SSH") }
-            OutlinedButton(onClick = { vm.disconnectSshTunnel() }) { Text("Disconnect SSH") }
+            Button(
+                onClick = { vm.connectSshTunnel() },
+                enabled = !isSshConnecting
+            ) {
+                if (isSshConnecting) {
+                    CircularProgressIndicator(modifier = Modifier.width(14.dp), strokeWidth = 2.dp)
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Connecting...")
+                } else {
+                    Text("Connect SSH")
+                }
+            }
+            OutlinedButton(
+                onClick = { vm.disconnectSshTunnel() },
+                enabled = !isSshConnecting
+            ) { Text("Disconnect SSH") }
+        }
+        if (!sshError.isNullOrBlank()) {
+            Text(
+                sshError ?: "",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error
+            )
         }
 
         Text("Projects", style = MaterialTheme.typography.titleMedium)
