@@ -83,6 +83,7 @@ OpenCodeClient/
 - `docs/OpenCode_iOS_Client_RFC.md` — 技术方案
 - `docs/OpenCode_Web_API.md` — OpenCode API 说明
 - `docs/Mobile_Cross_Platform_Implementation.md` — Android/Harmony 实施进度
+- `android_client/README.md` — Android 端安装、配置与连接说明
 
 ## 新增目录（跨端）
 
