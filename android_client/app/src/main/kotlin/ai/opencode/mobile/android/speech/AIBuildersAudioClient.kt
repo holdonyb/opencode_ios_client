@@ -5,6 +5,7 @@ import java.io.IOException
 import java.util.Base64
 import java.util.UUID
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
@@ -45,7 +46,7 @@ class AIBuildersAudioClient(
         val normalized = normalizeBaseUrl(baseUrl)
         require(token.isNotBlank()) { "${provider.displayName} token is empty" }
         if (provider == SpeechProvider.DOUBAO && isOpenSpeechBaseUrl(normalized)) {
-            return@withContext transcribeDoubaoOpenSpeechFlash(
+            return@withContext transcribeDoubaoOpenSpeechSubmitQuery(
                 normalizedBaseUrl = normalized,
                 token = token,
                 audioFile = audioFile,
@@ -121,7 +122,7 @@ class AIBuildersAudioClient(
         val normalized = normalizeBaseUrl(baseUrl)
         require(token.isNotBlank()) { "${provider.displayName} token is empty" }
         if (provider == SpeechProvider.DOUBAO && isOpenSpeechBaseUrl(normalized)) {
-            testDoubaoOpenSpeechFlash(
+            testDoubaoOpenSpeechSubmitQuery(
                 normalizedBaseUrl = normalized,
                 token = token,
                 doubaoResourceID = doubaoResourceID
@@ -224,22 +225,22 @@ class AIBuildersAudioClient(
             .contains("openspeech.bytedance.com")
     }
 
-    private fun transcribeDoubaoOpenSpeechFlash(
+    private suspend fun transcribeDoubaoOpenSpeechSubmitQuery(
         normalizedBaseUrl: String,
         token: String,
         audioFile: File,
         doubaoResourceID: String?
     ): TranscriptionResponse {
-        val (appKey, accessKey) = splitDoubaoCredentials(token)
         val requestID = UUID.randomUUID().toString()
         val resourceID = doubaoResourceID?.takeIf { it.isNotBlank() } ?: "volc.seedasr.auc"
         val audioBase64 = Base64.getEncoder().encodeToString(audioFile.readBytes())
+        val format = detectAudioFormat(audioFile.name)
         val body = buildJsonObject {
             put("user", buildJsonObject { put("uid", JsonPrimitive("opencode-android")) })
             put(
                 "audio",
                 buildJsonObject {
-                    put("format", JsonPrimitive("m4a"))
+                    put("format", JsonPrimitive(format))
                     put("data", JsonPrimitive(audioBase64))
                 }
             )
@@ -253,10 +254,9 @@ class AIBuildersAudioClient(
         }
 
         val request = Request.Builder()
-            .url("${normalizedBaseUrl.trimEnd('/')}/api/v3/auc/bigmodel/recognize/flash")
+            .url("${normalizedBaseUrl.trimEnd('/')}/api/v3/auc/bigmodel/submit")
             .header("Content-Type", "application/json")
-            .header("X-Api-App-Key", appKey)
-            .header("X-Api-Access-Key", accessKey)
+            .header("X-Api-Key", token.trim())
             .header("X-Api-Resource-Id", resourceID)
             .header("X-Api-Request-Id", requestID)
             .header("X-Api-Sequence", "-1")
@@ -265,77 +265,88 @@ class AIBuildersAudioClient(
 
         val response = http.newCall(request).execute()
         response.use {
-            val raw = it.body?.string().orEmpty()
-            val parsed = runCatching { json.parseToJsonElement(raw).jsonObject }.getOrNull()
-            val header = parsed?.get("header") as? JsonObject
-            val code = header?.get("code")?.jsonPrimitive?.contentOrNull
-            val message = header?.get("message")?.jsonPrimitive?.contentOrNull
-            if (!it.isSuccessful || (code != null && code != "1000")) {
-                val hint = if (message?.contains("resourceId", ignoreCase = true) == true) {
-                    " (check Doubao Resource ID for this key)"
-                } else {
-                    ""
-                }
-                throw IOException("Doubao transcription HTTP ${it.code}: ${message ?: raw}$hint")
+            val statusCode = it.header("X-Api-Status-Code").orEmpty()
+            val statusMessage = it.header("X-Api-Message").orEmpty()
+            if (!it.isSuccessful || (statusCode.isNotBlank() && statusCode != "20000000")) {
+                throw IOException("Doubao submit failed HTTP ${it.code}: ${statusMessage.ifBlank { statusCode }}")
             }
-            val text = extractText(parsed ?: JsonObject(emptyMap()))
-                ?: throw IOException("Doubao transcription response missing text")
-            return TranscriptionResponse(requestID = requestID, text = text)
         }
+
+        repeat(40) {
+            delay(800)
+            val query = Request.Builder()
+                .url("${normalizedBaseUrl.trimEnd('/')}/api/v3/auc/bigmodel/query")
+                .header("Content-Type", "application/json")
+                .header("X-Api-Key", token.trim())
+                .header("X-Api-Resource-Id", resourceID)
+                .header("X-Api-Request-Id", requestID)
+                .header("X-Api-Sequence", "-1")
+                .post("{}".toRequestBody("application/json".toMediaType()))
+                .build()
+
+            val queryResp = http.newCall(query).execute()
+            queryResp.use { q ->
+                val statusCode = q.header("X-Api-Status-Code").orEmpty()
+                val statusMessage = q.header("X-Api-Message").orEmpty()
+                val raw = q.body?.string().orEmpty()
+                val parsed = runCatching { json.parseToJsonElement(raw).jsonObject }.getOrNull()
+                val text = parsed?.let { extractText(it) }.orEmpty()
+
+                if (!q.isSuccessful) {
+                    throw IOException("Doubao query failed HTTP ${q.code}: ${statusMessage.ifBlank { raw }}")
+                }
+                if (statusCode == "20000001") {
+                    return@repeat
+                }
+                if (statusCode == "20000000") {
+                    if (text.isNotBlank()) {
+                        return TranscriptionResponse(requestID = requestID, text = text)
+                    }
+                    return TranscriptionResponse(requestID = requestID, text = "")
+                }
+                throw IOException("Doubao query failed: ${statusMessage.ifBlank { statusCode }}")
+            }
+        }
+        throw IOException("Doubao query timeout: no final result in time")
     }
 
-    private fun testDoubaoOpenSpeechFlash(
+    private fun testDoubaoOpenSpeechSubmitQuery(
         normalizedBaseUrl: String,
         token: String,
         doubaoResourceID: String?
     ) {
-        val (appKey, accessKey) = splitDoubaoCredentials(token)
         val requestID = UUID.randomUUID().toString()
         val resourceID = doubaoResourceID?.takeIf { it.isNotBlank() } ?: "volc.seedasr.auc"
-        val body = buildJsonObject {
-            put("user", buildJsonObject { put("uid", JsonPrimitive("opencode-android-test")) })
-            put("audio", buildJsonObject { put("format", JsonPrimitive("m4a")); put("data", JsonPrimitive("")) })
-            put("request", buildJsonObject { put("model_name", JsonPrimitive("bigmodel")) })
-        }
         val request = Request.Builder()
-            .url("${normalizedBaseUrl.trimEnd('/')}/api/v3/auc/bigmodel/recognize/flash")
+            .url("${normalizedBaseUrl.trimEnd('/')}/api/v3/auc/bigmodel/submit")
             .header("Content-Type", "application/json")
-            .header("X-Api-App-Key", appKey)
-            .header("X-Api-Access-Key", accessKey)
+            .header("X-Api-Key", token.trim())
             .header("X-Api-Resource-Id", resourceID)
             .header("X-Api-Request-Id", requestID)
             .header("X-Api-Sequence", "-1")
-            .post(json.encodeToString(JsonObject.serializer(), body).toRequestBody("application/json".toMediaType()))
+            .post("{}".toRequestBody("application/json".toMediaType()))
             .build()
 
         val response = http.newCall(request).execute()
         response.use {
-            val raw = it.body?.string().orEmpty()
-            val parsed = runCatching { json.parseToJsonElement(raw).jsonObject }.getOrNull()
-            val header = parsed?.get("header") as? JsonObject
-            val code = header?.get("code")?.jsonPrimitive?.contentOrNull
-            val message = header?.get("message")?.jsonPrimitive?.contentOrNull.orEmpty()
+            val statusCode = it.header("X-Api-Status-Code").orEmpty()
+            val statusMessage = it.header("X-Api-Message").orEmpty()
+            val body = it.body?.string().orEmpty()
             val authOrGrantError =
                 it.code == 401 || it.code == 403 ||
-                    message.contains("grant", ignoreCase = true) ||
-                    message.contains("resource", ignoreCase = true) ||
-                    message.contains("app key", ignoreCase = true) ||
-                    message.contains("access key", ignoreCase = true)
+                    statusCode.startsWith("45")
             if (authOrGrantError) {
-                throw IOException("Doubao connection test HTTP ${it.code}: ${message.ifBlank { raw }}")
+                throw IOException("Doubao connection test HTTP ${it.code}: ${statusMessage.ifBlank { body }}")
             }
         }
     }
 
-    private fun splitDoubaoCredentials(token: String): Pair<String, String> {
-        val trimmed = token.trim()
-        if (trimmed.contains(":")) {
-            val parts = trimmed.split(":", limit = 2)
-            if (parts[0].isNotBlank() && parts[1].isNotBlank()) {
-                return parts[0].trim() to parts[1].trim()
-            }
+    private fun detectAudioFormat(filename: String): String {
+        val ext = filename.substringAfterLast('.', "").lowercase()
+        return when (ext) {
+            "mp3", "wav", "m4a", "aac", "ogg", "flac", "amr", "pcm" -> ext
+            else -> "m4a"
         }
-        return trimmed to trimmed
     }
 
     private fun extractText(payload: JsonObject): String? {

@@ -48,13 +48,13 @@ E:\Android\Sdk\platform-tools\adb.exe -s emulator-5554 install -r .\app\build\ou
 ### Speech recognition (AI Builder)
 - 在 `Speech recognition` 里可选 `AI Builder` / `Doubao`
 - `Speech Base URL`
-- `Speech Token`（Doubao 模式下可填单 key，或 `appKey:accessKey`）
+- `Speech Token`（Doubao 模式下填写 API Key）
 - Doubao 模式下额外填写 `Doubao Resource ID`（如 `volc.seedasr.auc`）
 - `Custom Prompt` / `Terminology`
 - 点 `Test speech` 测试连通性
 
 Doubao 说明：
-- 如果 `Speech Base URL` 是 `https://openspeech.bytedance.com`，客户端会调用官方 `recognize/flash` 接口。
+- 如果 `Speech Base URL` 是 `https://openspeech.bytedance.com`，客户端会调用 OpenClaw 同款 `submit/query` 接口。
 - 如果是其它网关地址（如 AI Builder 代理），客户端走 OpenAI 兼容 `/v1/audio/transcriptions`。
 
 ### SSH Tunnel
