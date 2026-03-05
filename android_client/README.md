@@ -103,3 +103,62 @@ AndroidManifest 已开启：
 
 ### Q3: SSH 已连接但 App 还是旧地址
 - 再点一次 `Apply & Connect`
+
+## 9. OpenCode 的 SSH 远程部署（推荐两种）
+
+先说明安卓端 SSH 的实际行为：
+- App 会建立本地转发：`手机本地 localPort -> SSH 远端 127.0.0.1:remotePort`
+- 对应代码见：
+  - `android_client/app/src/main/kotlin/ai/opencode/mobile/android/ssh/AndroidSshTunnelManager.kt`
+
+### 方案 A：直接把 OpenCode 部署在 VPS（最简单）
+
+#### VPS 上
+1. 安装并确认 `opencode` 命令可用（`opencode --help`）。
+2. 启动服务（建议只监听本机）：
+
+```bash
+OPENCODE_SERVER_PASSWORD='your-password' opencode serve --hostname 127.0.0.1 --port 4096
+```
+
+3. VPS 本机自检：
+
+```bash
+curl -u any:your-password http://127.0.0.1:4096/
+```
+
+#### Android App 上
+- `Settings -> SSH Tunnel`
+  - `SSH Host`: 你的 VPS 域名/IP
+  - `SSH Port`: `22`
+  - `SSH User`: VPS 用户
+  - `Remote Port`: `4096`
+  - `Local Port`: `14096`（默认即可）
+- 点 `Connect SSH`
+- 回到上方 `Server` 区域，确认 URL 已变成 `http://127.0.0.1:14096`
+- 填 `Username/Password`（如果服务端开了 Basic Auth）
+- 点 `Apply & Connect`
+
+### 方案 B：OpenCode 在家里机器，VPS 只做跳板
+
+#### 家里机器
+1. 启动 OpenCode：
+
+```bash
+OPENCODE_SERVER_PASSWORD='your-password' opencode serve --hostname 127.0.0.1 --port 4096
+```
+
+2. 建立反向隧道到 VPS（把家里 4096 暴露到 VPS 的 18080）：
+
+```bash
+ssh -N -T -R 127.0.0.1:18080:127.0.0.1:4096 user@your-vps
+```
+
+#### Android App 上
+- SSH 配置同上，但 `Remote Port` 改为 `18080`
+- 点 `Connect SSH` 后，再点 `Apply & Connect`
+
+### 稳定运行建议（Linux）
+- OpenCode 用 `systemd` 常驻
+- 反向隧道用 `autossh` + `systemd` 常驻
+- 不要把 OpenCode 端口直接暴露公网（除非你已做 HTTPS + 严格认证）
