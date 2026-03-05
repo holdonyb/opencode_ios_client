@@ -366,8 +366,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         _settingsFeedback.value = "[${nowLabel()}] Applying settings..."
         _lastError.value = null
         val normalizedBase = normalizeBaseUrl(_settingsForm.value.baseUrl)
-        val username = _settingsForm.value.username
-        val password = _settingsForm.value.password
+        val username = _settingsForm.value.username.trim()
+        val password = _settingsForm.value.password.trim()
+        _settingsForm.update { it.copy(baseUrl = normalizedBase, username = username, password = password) }
         localStore.putString(Keys.serverBaseUrl, normalizedBase)
         localStore.putString(Keys.serverUsername, username)
         secretStore.put(Keys.secretServerPassword, password)
@@ -529,8 +530,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     _sshError.value = null
                     _settingsForm.update { it.copy(baseUrl = tunnelBaseUrl) }
                     localStore.putString(Keys.serverBaseUrl, tunnelBaseUrl)
-                    val username = _settingsForm.value.username.ifBlank { null }
-                    val password = _settingsForm.value.password.ifBlank { null }
+                    val username = _settingsForm.value.username.trim().ifBlank { null }
+                    val password = _settingsForm.value.password.trim().ifBlank { null }
                     reconfigureApi(
                         baseUrl = tunnelBaseUrl,
                         username = username,
