@@ -5,6 +5,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import ai.opencode.mobile.android.speech.AIBuildersAudioClient
 import ai.opencode.mobile.android.speech.AndroidAudioRecorder
+import ai.opencode.mobile.android.speech.SpeechProvider
 import ai.opencode.mobile.android.ssh.AndroidSshTunnelManager
 import ai.opencode.mobile.android.ssh.SshTunnelConfig
 import ai.opencode.mobile.android.storage.LocalSettingsStore
@@ -56,8 +57,10 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     )
 
     data class SpeechForm(
+        val provider: SpeechProvider = SpeechProvider.AIBUILDERS,
         val baseUrl: String = "https://space.ai-builders.com/backend",
         val token: String = "",
+        val doubaoResourceID: String = "volc.seedasr.auc",
         val customPrompt: String = "Prefer snake_case filenames and keep code terms unchanged.",
         val terminology: String = ""
     )
@@ -84,6 +87,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         const val serverUsername = "server_username"
         const val selectedProject = "selected_project_worktree"
         const val speechBaseUrl = "speech_base_url"
+        const val speechProvider = "speech_provider"
+        const val speechDoubaoResourceID = "speech_doubao_resource_id"
         const val speechPrompt = "speech_prompt"
         const val speechTerminology = "speech_terminology"
         const val sshHost = "ssh_host"
@@ -293,9 +298,33 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         _speechConnectionError.value = null
     }
 
+    fun setSpeechProvider(provider: SpeechProvider) {
+        _speechForm.update { current ->
+            val nextBase = when (provider) {
+                SpeechProvider.AIBUILDERS -> {
+                    if (current.provider == provider) current.baseUrl else "https://space.ai-builders.com/backend"
+                }
+                SpeechProvider.DOUBAO -> {
+                    if (current.provider == provider) current.baseUrl else current.baseUrl
+                }
+            }
+            current.copy(provider = provider, baseUrl = nextBase)
+        }
+        localStore.putString(Keys.speechProvider, provider.wireValue)
+        _speechConnectionOk.value = false
+        _speechConnectionError.value = null
+    }
+
     fun setSpeechToken(value: String) {
         _speechForm.update { it.copy(token = value) }
         secretStore.put(Keys.secretSpeechToken, value)
+        _speechConnectionOk.value = false
+        _speechConnectionError.value = null
+    }
+
+    fun setSpeechDoubaoResourceID(value: String) {
+        _speechForm.update { it.copy(doubaoResourceID = value) }
+        localStore.putString(Keys.speechDoubaoResourceID, value)
         _speechConnectionOk.value = false
         _speechConnectionError.value = null
     }
@@ -450,15 +479,22 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         val form = _speechForm.value
         if (form.token.isBlank()) {
             _speechConnectionOk.value = false
-            _speechConnectionError.value = "AI Builder token is required"
+            _speechConnectionError.value = "${form.provider.displayName} token is required"
+            return
+        }
+        if (form.provider == SpeechProvider.DOUBAO && form.doubaoResourceID.isBlank()) {
+            _speechConnectionOk.value = false
+            _speechConnectionError.value = "Doubao Resource ID is required"
             return
         }
         viewModelScope.launch {
             _speechConnectionError.value = null
             runCatching {
                 speechClient.testConnection(
+                    provider = form.provider,
                     baseUrl = form.baseUrl,
-                    token = form.token
+                    token = form.token,
+                    doubaoResourceID = form.doubaoResourceID.takeIf { it.isNotBlank() }
                 )
             }.onSuccess {
                 _speechConnectionOk.value = true
@@ -492,15 +528,21 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             }
             val form = _speechForm.value
             if (form.token.isBlank()) {
-                _lastError.value = "AI Builder token is required"
+                _lastError.value = "${form.provider.displayName} token is required"
+                return@launch
+            }
+            if (form.provider == SpeechProvider.DOUBAO && form.doubaoResourceID.isBlank()) {
+                _lastError.value = "Doubao Resource ID is required"
                 return@launch
             }
             _isTranscribing.value = true
             runCatching {
                 speechClient.transcribe(
+                    provider = form.provider,
                     baseUrl = form.baseUrl,
                     token = form.token,
                     audioFile = file,
+                    doubaoResourceID = form.doubaoResourceID.takeIf { it.isNotBlank() },
                     prompt = form.customPrompt.takeIf { it.isNotBlank() },
                     terms = form.terminology.takeIf { it.isNotBlank() }
                 )
@@ -942,13 +984,17 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         val password = secretStore.get(Keys.secretServerPassword)
         _settingsForm.value = SettingsForm(baseUrl = baseUrl, username = username, password = password)
 
+        val speechProvider = SpeechProvider.fromWireValue(localStore.getString(Keys.speechProvider))
         val speechBase = localStore.getString(Keys.speechBaseUrl, "https://space.ai-builders.com/backend")
+        val speechResourceID = localStore.getString(Keys.speechDoubaoResourceID, SpeechForm().doubaoResourceID)
         val speechPrompt = localStore.getString(Keys.speechPrompt, SpeechForm().customPrompt)
         val speechTerms = localStore.getString(Keys.speechTerminology)
         val speechToken = secretStore.get(Keys.secretSpeechToken)
         _speechForm.value = SpeechForm(
+            provider = speechProvider,
             baseUrl = speechBase,
             token = speechToken,
+            doubaoResourceID = speechResourceID,
             customPrompt = speechPrompt,
             terminology = speechTerms
         )

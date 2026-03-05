@@ -65,6 +65,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
+import ai.opencode.mobile.android.speech.SpeechProvider
 import ai.opencode.mobile.android.ui.AppViewModel
 import ai.opencode.mobile.core.model.Part
 import ai.opencode.mobile.core.model.Project
@@ -909,7 +910,19 @@ private fun SettingsScreen(vm: AppViewModel, state: AppState) {
             OutlinedButton(onClick = { vm.refreshAll() }) { Text("Refresh") }
         }
 
-        Text("Speech recognition (AI Builder)", style = MaterialTheme.typography.titleMedium)
+        Text("Speech recognition", style = MaterialTheme.typography.titleMedium)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+            FilterChip(
+                selected = speech.provider == SpeechProvider.AIBUILDERS,
+                onClick = { vm.setSpeechProvider(SpeechProvider.AIBUILDERS) },
+                label = { Text("AI Builder") }
+            )
+            FilterChip(
+                selected = speech.provider == SpeechProvider.DOUBAO,
+                onClick = { vm.setSpeechProvider(SpeechProvider.DOUBAO) },
+                label = { Text("Doubao") }
+            )
+        }
         OutlinedTextField(
             value = speech.baseUrl,
             onValueChange = vm::setSpeechBaseUrl,
@@ -920,11 +933,20 @@ private fun SettingsScreen(vm: AppViewModel, state: AppState) {
         OutlinedTextField(
             value = speech.token,
             onValueChange = vm::setSpeechToken,
-            label = { Text("Speech Token") },
+            label = { Text(if (speech.provider == SpeechProvider.DOUBAO) "Doubao API Key" else "Speech Token") },
             modifier = Modifier.fillMaxWidth(),
             singleLine = true,
             visualTransformation = PasswordVisualTransformation()
         )
+        if (speech.provider == SpeechProvider.DOUBAO) {
+            OutlinedTextField(
+                value = speech.doubaoResourceID,
+                onValueChange = vm::setSpeechDoubaoResourceID,
+                label = { Text("Doubao Resource ID") },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true
+            )
+        }
         OutlinedTextField(
             value = speech.customPrompt,
             onValueChange = vm::setSpeechCustomPrompt,

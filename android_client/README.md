@@ -46,8 +46,10 @@ E:\Android\Sdk\platform-tools\adb.exe -s emulator-5554 install -r .\app\build\ou
 - 点击 `Apply & Connect` 生效并重连
 
 ### Speech recognition (AI Builder)
+- 在 `Speech recognition` 里可选 `AI Builder` / `Doubao`
 - `Speech Base URL`
-- `Speech Token`
+- `Speech Token`（Doubao 模式下填写 API Key）
+- Doubao 模式下额外填写 `Doubao Resource ID`（如 `volc.seedasr.auc`）
 - `Custom Prompt` / `Terminology`
 - 点 `Test speech` 测试连通性
 
