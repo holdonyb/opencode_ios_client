@@ -1174,6 +1174,12 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 "SSH authentication failed. Check user/password or PEM key."
             lower.contains("invalid privatekey") || lower.contains("privatekey") ->
                 "Invalid PEM private key format."
+            lower.contains("cannot listen to port")
+                || lower.contains("could not request local forwarding")
+                || lower.contains("address already in use")
+                || lower.contains("bind")
+                || lower.contains("permission denied") && lower.contains("local forwarding") ->
+                "SSH local port is unavailable. Change Local Port (for example 14196) and retry."
             lower.contains("unknownhostkey") ->
                 "SSH host key check failed."
             lower.contains("timeout") ->
