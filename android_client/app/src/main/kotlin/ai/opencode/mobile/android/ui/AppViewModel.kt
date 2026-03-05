@@ -19,9 +19,13 @@ import ai.opencode.mobile.core.state.AppState
 import ai.opencode.mobile.core.state.AppStateStore
 import ai.opencode.mobile.core.state.SseSideEffect
 import java.io.File
+import java.net.ConnectException
+import java.net.SocketTimeoutException
+import java.net.UnknownHostException
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import javax.net.ssl.SSLException
 import kotlin.math.max
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -56,7 +60,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         val useKeyAuth: Boolean = false,
         val privateKeyPem: String = "",
         val privateKeyPassphrase: String = "",
-        val remotePort: String = "4096",
+        val remotePort: String = "5096",
         val localPort: String = "14096"
     )
 
@@ -419,7 +423,11 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 startSse()
                 recomputeCanCreateSession()
             } catch (e: Exception) {
-                val reason = e.message?.takeIf { it.isNotBlank() } ?: "Connection failed"
+                val reason = buildConnectionFailureReason(
+                    throwable = e,
+                    baseUrl = currentConfig.baseUrl,
+                    sshStatus = _sshStatus.value
+                )
                 store.setConnection(connected = false, error = reason)
                 _lastError.value = reason
                 if (_isApplyingSettings.value) {
@@ -531,7 +539,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     refreshAll()
                 }
                 .onFailure { e ->
-                    val reason = e.message?.takeIf { it.isNotBlank() } ?: e::class.java.simpleName
+                    val reason = buildSshFailureReason(e)
                     _sshStatus.value = "Error"
                     _sshError.value = reason
                     _lastError.value = "SSH connect failed: $reason"
@@ -1081,7 +1089,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             useKeyAuth = localStore.getString(Keys.sshUseKeyAuth).toBooleanStrictOrNull() ?: false,
             privateKeyPem = secretStore.get(Keys.secretSshPrivateKey),
             privateKeyPassphrase = secretStore.get(Keys.secretSshPassphrase),
-            remotePort = localStore.getString(Keys.sshRemotePort, "4096"),
+            remotePort = localStore.getString(Keys.sshRemotePort, "5096"),
             localPort = localStore.getString(Keys.sshLocalPort, "14096")
         )
 
@@ -1116,5 +1124,69 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun nowLabel(): String = synchronized(feedbackTimeFormat) {
         feedbackTimeFormat.format(Date())
+    }
+
+    private fun buildConnectionFailureReason(
+        throwable: Throwable,
+        baseUrl: String,
+        sshStatus: String
+    ): String {
+        val root = throwable.rootCause()
+        val raw = root.message?.takeIf { it.isNotBlank() }
+            ?: throwable.message?.takeIf { it.isNotBlank() }
+            ?: root::class.java.simpleName
+        val lower = raw.lowercase(Locale.US)
+        val usesLocalhost = baseUrl.contains("127.0.0.1") || baseUrl.contains("localhost")
+        val sshConnected = sshStatus.startsWith("Connected")
+        val tunnelHint = if (usesLocalhost && !sshConnected) {
+            "localhost URL needs SSH tunnel. Tap 'Connect SSH' first."
+        } else if (usesLocalhost) {
+            "Check SSH remote/local ports and remote OpenCode server port."
+        } else {
+            "Check Server URL/port and server process."
+        }
+
+        return when {
+            lower.contains("http 401") -> "Unauthorized (401). Check Username/Password."
+            lower.contains("http 403") -> "Forbidden (403). Check server auth policy."
+            lower.contains("http 404") -> "Endpoint not found (404). Check Server URL."
+            lower.contains("cleartext") -> "Cleartext HTTP blocked. Install latest APK and use http:// for tunnel URL."
+            root is UnknownHostException || lower.contains("unable to resolve host") ->
+                "Cannot resolve host. Check Server URL host."
+            root is ConnectException || lower.contains("failed to connect") || lower.contains("connection refused") ->
+                "Connection refused. $tunnelHint"
+            root is SocketTimeoutException || lower.contains("timeout") ->
+                "Connection timeout. $tunnelHint"
+            root is SSLException || lower.contains("ssl") || lower.contains("handshake") ->
+                "SSL/TLS failed. Use https:// only when server has valid TLS."
+            else -> "Connection failed: $raw"
+        }
+    }
+
+    private fun buildSshFailureReason(throwable: Throwable): String {
+        val root = throwable.rootCause()
+        val raw = root.message?.takeIf { it.isNotBlank() }
+            ?: throwable.message?.takeIf { it.isNotBlank() }
+            ?: root::class.java.simpleName
+        val lower = raw.lowercase(Locale.US)
+        return when {
+            lower.contains("auth fail") || lower.contains("authentication") ->
+                "SSH authentication failed. Check user/password or PEM key."
+            lower.contains("invalid privatekey") || lower.contains("privatekey") ->
+                "Invalid PEM private key format."
+            lower.contains("unknownhostkey") ->
+                "SSH host key check failed."
+            lower.contains("timeout") ->
+                "SSH timeout. Check VPS IP/port and firewall."
+            else -> raw
+        }
+    }
+
+    private fun Throwable.rootCause(): Throwable {
+        var current: Throwable = this
+        while (current.cause != null && current.cause !== current) {
+            current = current.cause!!
+        }
+        return current
     }
 }

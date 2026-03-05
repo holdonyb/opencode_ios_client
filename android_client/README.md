@@ -134,7 +134,7 @@ curl -u any:your-password http://127.0.0.1:4096/
   - `SSH Host`: 你的 VPS 域名/IP
   - `SSH Port`: `22`
   - `SSH User`: VPS 用户
-  - `Remote Port`: `4096`
+  - `Remote Port`: OpenCode 在 VPS 上监听的端口（例如 `5096`）
   - `Local Port`: `14096`（默认即可）
 - 点 `Connect SSH`
 - 回到上方 `Server` 区域，确认 URL 已变成 `http://127.0.0.1:14096`

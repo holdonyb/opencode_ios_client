@@ -13,7 +13,7 @@ data class SshTunnelConfig(
     val password: String = "",
     val privateKeyPem: String? = null,
     val privateKeyPassphrase: String? = null,
-    val remotePort: Int = 18080,
+    val remotePort: Int = 5096,
     val localPort: Int = 14096
 )
 
