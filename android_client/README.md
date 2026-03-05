@@ -1,25 +1,105 @@
-# OpenCode Android Client
+# OpenCode Android Client 使用说明
 
-Android implementation of the OpenCode mobile client.
+Android 端实现（Jetpack Compose + Kotlin），用于连接 OpenCode 服务、管理会话、查看文件和设置语音/SSH。
 
-## Modules
+## 1. 环境准备
 
-- `app`: Android UI (Jetpack Compose)
-- `core`: API, SSE, reducer/state, contract adapters
+### 必需
+- Android SDK（已配置 `adb`、`emulator`）
+- JDK 17
+- 可用的 OpenCode Server（本地或远端）
 
-## Scope in this implementation
+### 本机命令行（PowerShell）推荐环境变量
 
-- Contract-aligned wire models
-- HTTP client and SSE stream parser
-- Session/message reducer baseline
-- Compose app shell with Chat / Files / Settings tabs
-- Golden-vector tests wired to `../mobile_contract/golden`
-
-## Build (when Android toolchain is installed)
-
-```bash
-cd android_client
-./gradlew :core:testDebugUnitTest
-./gradlew :app:assembleDebug
+```powershell
+$env:JAVA_HOME='E:\Android\tools\jdk17_tmp\extract\jdk-17.0.18+8'
+$env:Path="$env:JAVA_HOME\bin;$env:Path"
 ```
 
+## 2. 编译 APK
+
+在仓库根目录执行：
+
+```powershell
+cd android_client
+.\gradlew.bat :app:assembleDebug --no-daemon --max-workers=1 -Dorg.gradle.jvmargs="-Xmx2048m -Xms512m -XX:MaxMetaspaceSize=512m -XX:ReservedCodeCacheSize=256m -XX:HeapBaseMinAddress=4g -XX:ActiveProcessorCount=2 -Dfile.encoding=UTF-8" -Dkotlin.daemon.jvm.options=-Xmx512m
+```
+
+输出 APK：
+
+`android_client/app/build/outputs/apk/debug/app-debug.apk`
+
+## 3. 安装到模拟器
+
+```powershell
+E:\Android\Sdk\platform-tools\adb.exe devices
+E:\Android\Sdk\platform-tools\adb.exe -s emulator-5554 install -r .\app\build\outputs\apk\debug\app-debug.apk
+```
+
+## 4. App 内配置入口（重点）
+
+启动 App 后，所有连接配置都在 `Settings` 页签。
+
+### Server
+- `Server URL`：OpenCode 服务地址
+- `Username` / `Password`：可选，服务启用 Basic Auth 时填写
+- 点击 `Apply & Connect` 生效并重连
+
+### Speech recognition (AI Builder)
+- `Speech Base URL`
+- `Speech Token`
+- `Custom Prompt` / `Terminology`
+- 点 `Test speech` 测试连通性
+
+### SSH Tunnel
+- 填写 `SSH Host/Port/User` 和密码或私钥
+- `Connect SSH` 建立隧道后，URL 会自动改到 `http://127.0.0.1:<localPort>`
+- 建立隧道后，仍需点一次 `Apply & Connect` 才会切换 App 的实际连接配置
+
+## 5. URL 该怎么填（最常用）
+
+### 场景 A：Android 模拟器连你电脑上的 OpenCode
+- `Server URL` 填：`http://10.0.2.2:4096`
+
+说明：`127.0.0.1` 在模拟器里指向模拟器自己，不是电脑宿主机。
+
+### 场景 B：真机连同一局域网电脑
+- `Server URL` 填：`http://<你的电脑局域网IP>:4096`
+- 例如：`http://192.168.1.20:4096`
+
+### 场景 C：走 SSH 隧道
+- 在 `SSH Tunnel` 配好后点 `Connect SSH`
+- 自动得到 `http://127.0.0.1:<localPort>`
+- 再点 `Apply & Connect`
+
+## 6. Sessions 页面怎么用
+
+`Sessions` 页签已支持：
+- 按项目分组显示
+- `session -> 子session` 展开/收起
+- 点行切换当前会话
+- 会话操作：`Create / Rename / Delete / Compact / Load older`
+
+注意：
+- 选中具体项目过滤时，`Create` 会被禁用
+- 切回 `Server default` 后可创建新会话
+
+## 7. 网络策略说明（这次已修复）
+
+AndroidManifest 已开启：
+
+- `android:usesCleartextTraffic="true"`
+
+所以 `http://` 地址不再被 Android 网络安全策略拦截。
+
+## 8. 常见问题
+
+### Q1: 连接不上但没有 cleartext 报错
+- 通常是地址不可达（端口未开、服务未启动、IP 填错）
+- 先在服务端确认 `opencode serve --port 4096` 已运行
+
+### Q2: 模拟器里填 `127.0.0.1:4096` 连不上
+- 改成 `10.0.2.2:4096`（除非你确实在 App 内用了 SSH 隧道）
+
+### Q3: SSH 已连接但 App 还是旧地址
+- 再点一次 `Apply & Connect`
