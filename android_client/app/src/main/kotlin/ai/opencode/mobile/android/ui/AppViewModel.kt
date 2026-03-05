@@ -326,7 +326,16 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     if (current.provider == provider) current.baseUrl else "https://space.ai-builders.com/backend"
                 }
                 SpeechProvider.DOUBAO -> {
-                    if (current.provider == provider) current.baseUrl else current.baseUrl
+                    if (current.provider == provider) {
+                        current.baseUrl
+                    } else {
+                        val normalized = current.baseUrl.trim().lowercase()
+                        if (normalized.contains("space.ai-builders.com")) {
+                            "https://openspeech.bytedance.com"
+                        } else {
+                            current.baseUrl
+                        }
+                    }
                 }
             }
             current.copy(provider = provider, baseUrl = nextBase)

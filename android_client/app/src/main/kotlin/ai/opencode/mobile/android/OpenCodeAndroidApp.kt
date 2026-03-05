@@ -1039,12 +1039,17 @@ private fun SettingsScreen(vm: AppViewModel, state: AppState) {
         OutlinedTextField(
             value = speech.token,
             onValueChange = vm::setSpeechToken,
-            label = { Text(if (speech.provider == SpeechProvider.DOUBAO) "Doubao API Key" else "Speech Token") },
+            label = { Text(if (speech.provider == SpeechProvider.DOUBAO) "Doubao Token / AppKey:AccessKey" else "Speech Token") },
             modifier = Modifier.fillMaxWidth(),
             singleLine = true,
             visualTransformation = PasswordVisualTransformation()
         )
         if (speech.provider == SpeechProvider.DOUBAO) {
+            Text(
+                "For openspeech.bytedance.com, token can be 'appKey:accessKey'. A single key will be used for both.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
             OutlinedTextField(
                 value = speech.doubaoResourceID,
                 onValueChange = vm::setSpeechDoubaoResourceID,
